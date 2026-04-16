@@ -1,7 +1,28 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "invoice-processing"
 version = "0.1.0"
-description = "Add your description here"
+description = "Invoice processing pipeline utilities"
 readme = "README.md"
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    "google-cloud-storage>=2.14.0",
+]
+
+[project.scripts]
+invoice-upload-historical = "invoice_processing.cli:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
