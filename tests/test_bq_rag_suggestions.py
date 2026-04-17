@@ -3,8 +3,13 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from unittest.mock import MagicMock
 
-from invoice_processing.bq_rag_suggestions import row_to_api_detail, row_to_api_list_item
+from invoice_processing.bq_rag_suggestions import (
+    insert_suggestion_row,
+    row_to_api_detail,
+    row_to_api_list_item,
+)
 
 
 def test_row_to_api_detail() -> None:
@@ -52,3 +57,26 @@ def test_row_to_api_list_item_preview() -> None:
     assert item["suggestion_id"] == "x"
     assert len(item["rationale_preview"]) <= 165
     assert item["journal_lines_preview"][0]["account"] == "A"
+
+
+def test_insert_suggestion_row_serializes_neighbors_as_json_string() -> None:
+    """Streaming insert must not pass a Python list for a JSON column (BQ: non-repeated field)."""
+    client = MagicMock()
+    client.insert_rows_json = MagicMock(return_value=[])
+    insert_suggestion_row(
+        client,
+        "proj.ds.rag_suggestions",
+        {
+            "suggestion_id": "s1",
+            "created_at": datetime(2024, 1, 1, tzinfo=timezone.utc),
+            "neighbors": [{"rank": 1}],
+            "extraction": {"document_id": "a"},
+            "suggestion": {"confidence": 0.5},
+            "confidence_meta": {"k": 1},
+        },
+    )
+    client.insert_rows_json.assert_called_once()
+    row = client.insert_rows_json.call_args[0][1][0]
+    assert row["neighbors"] == '[{"rank": 1}]'
+    assert row["extraction"] == '{"document_id": "a"}'
+    assert isinstance(row["suggestion"], str)

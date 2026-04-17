@@ -18,6 +18,15 @@ if TYPE_CHECKING:
 _DEFAULT_TABLE = "rag_suggestions"
 
 
+def _streaming_json_value(value: Any) -> str | None:
+    """``insert_rows_json`` maps Python ``list`` to ARRAY; JSON columns need one scalar JSON document."""
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return value
+    return json.dumps(value, default=str)
+
+
 def rag_suggestions_schema() -> list[bigquery.SchemaField]:
     return [
         bigquery.SchemaField("suggestion_id", "STRING", mode="REQUIRED"),
@@ -79,10 +88,10 @@ def insert_suggestion_row(
                 "document_id": row.get("document_id"),
                 "status": row.get("status"),
                 "final_confidence": row.get("final_confidence"),
-                "extraction": row.get("extraction"),
-                "suggestion": row.get("suggestion"),
-                "neighbors": row.get("neighbors"),
-                "confidence_meta": row.get("confidence_meta"),
+                "extraction": _streaming_json_value(row.get("extraction")),
+                "suggestion": _streaming_json_value(row.get("suggestion")),
+                "neighbors": _streaming_json_value(row.get("neighbors")),
+                "confidence_meta": _streaming_json_value(row.get("confidence_meta")),
             }
         ],
     )
