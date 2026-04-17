@@ -28,6 +28,10 @@ def test_assert_ident_rejects_dotted_name() -> None:
         _assert_ident("foo.bar")
 
 
+def test_assert_ident_accepts_hyphenated_project_style_id() -> None:
+    assert _assert_ident("my-gcp-project-123") == "my-gcp-project-123"
+
+
 def test_invoice_embedding_inner_select_contains_supplier_and_lines() -> None:
     sql = invoice_embedding_inner_select_sql("`p`.`d`.`invoice_extractions`")
     assert "supplier.legal_name" in sql

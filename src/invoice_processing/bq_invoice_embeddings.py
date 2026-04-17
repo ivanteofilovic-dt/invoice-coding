@@ -26,7 +26,9 @@ _DEFAULT_GL_LINES_TABLE = "gl_lines"
 _DEFAULT_GL_CONTEXT_VIEW = "v_invoice_gl_context"
 _DEFAULT_REMOTE_MODEL = "bqml_invoice_embedding"
 
-_IDENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,1023}$")
+# Hyphens are valid in GCP project IDs (and some connection ids); dataset/table
+# ids are typically alphanumeric + underscore only—hyphenated datasets fail at BQ.
+_IDENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_-]{0,1023}$")
 _CONNECTION_REGION_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 
 
