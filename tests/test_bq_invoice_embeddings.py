@@ -107,6 +107,9 @@ def test_build_vector_search_stored_has_no_ai_generate() -> None:
     assert "AI.GENERATE_EMBEDDING" not in sql
     assert "VECTOR_SEARCH" in sql
     assert "FROM `p.d.invoice_embeddings`" in sql
+    assert "base.gcs_uri AS gcs_uri" in sql
+    assert "(SELECT embedding FROM qemb)" in sql
+    assert "  'embedding'," in sql
 
 
 def test_build_rag_stored_uses_stored_vector_search() -> None:
@@ -143,6 +146,8 @@ def test_build_vector_search_uses_retrieval_query_and_cosine() -> None:
     assert "COSINE" in sql
     assert "gs://b/x.pdf" in sql
     assert "LIMIT 5" in sql
+    assert "base.gcs_uri AS gcs_uri" in sql
+    assert "WHERE base.gcs_uri !=" in sql
 
 
 def test_build_rag_neighbors_wraps_hits_subquery() -> None:

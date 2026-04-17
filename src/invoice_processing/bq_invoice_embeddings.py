@@ -464,6 +464,9 @@ def build_vector_search_by_stored_embedding_sql(
 ) -> str:
     """Top-K similar rows using the query invoice's vector already stored in ``invoice_embeddings``.
 
+    ``VECTOR_SEARCH`` returns base rows under the ``base`` struct plus ``distance``; we project
+    ``base.gcs_uri`` (etc.) and pass the query embedding column name ``'embedding'`` per SQL reference.
+
     No remote model or BigQuery connection is used. Fails at query time if ``gcs_uri`` has no row.
     """
     emb_tbl = _qualified(project_id, dataset_id, embeddings_table_id)
@@ -476,25 +479,19 @@ WITH qemb AS (
   LIMIT 1
 )
 SELECT
-  gcs_uri,
-  embed_text_version,
-  content_hash,
+  base.gcs_uri AS gcs_uri,
+  base.embed_text_version AS embed_text_version,
+  base.content_hash AS content_hash,
   distance
-FROM (
-  SELECT
-    gcs_uri,
-    embed_text_version,
-    content_hash,
-    distance
-  FROM VECTOR_SEARCH(
-    TABLE {emb_tbl},
-    'embedding',
-    (SELECT embedding FROM qemb),
-    distance_type => 'COSINE',
-    top_k => {int(top_k) + 10}
-  )
+FROM VECTOR_SEARCH(
+  TABLE {emb_tbl},
+  'embedding',
+  (SELECT embedding FROM qemb),
+  'embedding',
+  distance_type => 'COSINE',
+  top_k => {int(top_k) + 10}
 )
-WHERE gcs_uri != '{uri_esc}'
+WHERE base.gcs_uri != '{uri_esc}'
 ORDER BY distance
 LIMIT {int(top_k)}
 """.strip()
@@ -667,25 +664,19 @@ qemb AS (
   )
 )
 SELECT
-  gcs_uri,
-  embed_text_version,
-  content_hash,
+  base.gcs_uri AS gcs_uri,
+  base.embed_text_version AS embed_text_version,
+  base.content_hash AS content_hash,
   distance
-FROM (
-  SELECT
-    gcs_uri,
-    embed_text_version,
-    content_hash,
-    distance
-  FROM VECTOR_SEARCH(
-    TABLE {emb_tbl},
-    'embedding',
-    (SELECT embedding FROM qemb),
-    distance_type => 'COSINE',
-    top_k => {int(top_k) + 10}
-  )
+FROM VECTOR_SEARCH(
+  TABLE {emb_tbl},
+  'embedding',
+  (SELECT embedding FROM qemb),
+  'embedding',
+  distance_type => 'COSINE',
+  top_k => {int(top_k) + 10}
 )
-WHERE gcs_uri != '{uri_esc}'
+WHERE base.gcs_uri != '{uri_esc}'
 ORDER BY distance
 LIMIT {int(top_k)}
 """.strip()
