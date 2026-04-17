@@ -9,11 +9,13 @@ import pytest
 from invoice_processing.bq_invoice_embeddings import (
     EMBED_TEXT_VERSION,
     DEFAULT_OUTPUT_DIMENSIONALITY,
+    IVF_VECTOR_INDEX_MIN_ROW_COUNT,
     _assert_ident,
     _sanitize_precomputed_embedding_row,
     build_backfill_embeddings_insert_sql,
     build_create_remote_embedding_model_ddl,
     build_create_vector_index_ddl,
+    build_embeddings_table_health_sql,
     build_invoice_embed_text_view_ddl,
     build_invoice_gl_context_view_ddl,
     build_rag_neighbors_with_gl_sql,
@@ -77,6 +79,22 @@ def test_build_backfill_contains_generate_embedding_and_insert() -> None:
     assert "AI.GENERATE_EMBEDDING" in sql
     assert "RETRIEVAL_DOCUMENT" in sql
     assert str(DEFAULT_OUTPUT_DIMENSIONALITY) in sql
+    assert "WHERE g.embedding IS NOT NULL" in sql
+    assert "ARRAY_LENGTH(g.embedding) > 0" in sql
+
+
+def test_ivf_vector_index_min_row_count_is_5000() -> None:
+    assert IVF_VECTOR_INDEX_MIN_ROW_COUNT == 5000
+
+
+def test_build_embeddings_table_health_sql() -> None:
+    sql = build_embeddings_table_health_sql(
+        project_id="p",
+        dataset_id="d",
+        table_id="invoice_embeddings",
+    )
+    assert "FROM `p.d.invoice_embeddings`" in sql
+    assert "rows_with_vectors" in sql
 
 
 def test_build_vector_search_stored_has_no_ai_generate() -> None:
@@ -161,6 +179,7 @@ def test_build_create_vector_index_ddl() -> None:
     )
     assert "CREATE VECTOR INDEX" in sql
     assert "`p.d.idx1`" in sql
+    assert "index_type = 'IVF'" in sql
     assert "ivf_options = '{\"num_lists\": 100}'" in sql
 
 

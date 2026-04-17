@@ -38,6 +38,11 @@ DEFAULT_EMBEDDING_ENDPOINT = "text-embedding-004"
 # Must match output_dimensionality passed to AI.GENERATE_EMBEDDING for text-embedding models (max 768).
 DEFAULT_OUTPUT_DIMENSIONALITY = 768
 
+# BigQuery quota: IVF (and TreeAH) vector indexes cannot be created on tiny tables.
+# Below this row count, use ``VECTOR_SEARCH`` without an index (exact / brute-force).
+# See https://docs.cloud.google.com/bigquery/quotas#vector-index-limits
+IVF_VECTOR_INDEX_MIN_ROW_COUNT = 5000
+
 _DEFAULT_EXTRACTIONS_TABLE = "invoice_extractions"
 _DEFAULT_EMBEDDINGS_TABLE = "invoice_embeddings"
 _DEFAULT_EMBED_TEXT_VIEW = "v_invoice_embed_text"
@@ -317,6 +322,25 @@ OPTIONS (ENDPOINT = '{ep}')
 """.strip()
 
 
+def build_embeddings_table_health_sql(
+    *,
+    project_id: str,
+    dataset_id: str,
+    table_id: str = _DEFAULT_EMBEDDINGS_TABLE,
+) -> str:
+    """Aggregate stats for diagnosing vector index / ``VECTOR_SEARCH`` issues."""
+    tbl = _qualified(project_id, dataset_id, table_id)
+    return f"""
+SELECT
+  COUNT(*) AS row_count,
+  COUNTIF(embedding IS NULL) AS null_embedding_rows,
+  COUNTIF(embedding IS NOT NULL AND ARRAY_LENGTH(embedding) > 0) AS rows_with_vectors,
+  MIN(ARRAY_LENGTH(embedding)) AS min_array_length,
+  MAX(ARRAY_LENGTH(embedding)) AS max_array_length
+FROM {tbl}
+""".strip()
+
+
 def build_create_vector_index_ddl(
     *,
     project_id: str,
@@ -324,13 +348,22 @@ def build_create_vector_index_ddl(
     table_id: str = _DEFAULT_EMBEDDINGS_TABLE,
     index_id: str = "invoice_embeddings_ivf",
 ) -> str:
-    """Optional IVF vector index on the embedding column (scale / ANN)."""
+    """Optional IVF vector index on the embedding column (scale / ANN).
+
+    BigQuery requires the base table to have at least :data:`IVF_VECTOR_INDEX_MIN_ROW_COUNT`
+    rows to create an IVF index; smaller tables should use :func:`build_vector_search_by_gcs_uri_sql`
+    / :func:`build_vector_search_by_stored_embedding_sql` only (``VECTOR_SEARCH`` uses brute
+    force when no index exists).
+
+    Also requires non-NULL ``embedding`` arrays; see :func:`build_embeddings_table_health_sql`.
+    """
     tbl = _qualified(project_id, dataset_id, table_id)
     idx = _qualified(project_id, dataset_id, index_id)
     return f"""
 CREATE VECTOR INDEX IF NOT EXISTS {idx}
 ON {tbl}(embedding)
 OPTIONS (
+  index_type = 'IVF',
   distance_type = 'COSINE',
   ivf_options = '{{"num_lists": 100}}'
 )
@@ -381,7 +414,11 @@ WITH pending AS (
   )
 ),
 generated AS (
-  SELECT *
+  SELECT
+    gcs_uri,
+    embed_text_version,
+    content_hash,
+    embedding
   FROM AI.GENERATE_EMBEDDING(
     MODEL {model},
     (
@@ -412,6 +449,8 @@ SELECT
 FROM generated AS g
 INNER JOIN pending AS p
   ON p.gcs_uri = g.gcs_uri
+WHERE g.embedding IS NOT NULL
+  AND ARRAY_LENGTH(g.embedding) > 0
 """.strip()
 
 

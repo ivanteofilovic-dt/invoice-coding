@@ -12,10 +12,12 @@ from google.cloud import bigquery
 from invoice_processing.bq_invoice_embeddings import (
     DEFAULT_EMBEDDING_ENDPOINT,
     DEFAULT_OUTPUT_DIMENSIONALITY,
+    IVF_VECTOR_INDEX_MIN_ROW_COUNT,
     build_backfill_embeddings_insert_sql,
     build_create_connection_ddl,
     build_create_remote_embedding_model_ddl,
     build_create_vector_index_ddl,
+    build_embeddings_table_health_sql,
     build_invoice_embed_text_view_ddl,
     build_invoice_gl_context_view_ddl,
     build_rag_neighbors_with_gl_sql,
@@ -59,6 +61,8 @@ def main() -> None:
             "create-connection-sql",
             "create-remote-model-sql",
             "create-vector-index-sql",
+            "create-vector-index",
+            "diagnose-embeddings",
             "backfill",
             "import-embeddings",
             "search",
@@ -98,7 +102,9 @@ def main() -> None:
     parser.add_argument(
         "--with-vector-index",
         action="store_true",
-        help="For setup: also CREATE VECTOR INDEX on invoice_embeddings (optional scale-up).",
+        help="For setup: CREATE VECTOR INDEX only if the table has at least %s rows "
+        "(BigQuery IVF minimum); otherwise skipped. Below that, use search/rag-search "
+        "(VECTOR_SEARCH without index is fine)." % IVF_VECTOR_INDEX_MIN_ROW_COUNT,
     )
     args = parser.parse_args()
 
@@ -181,6 +187,55 @@ def main() -> None:
         return
 
     client = bigquery.Client(project=project_id, location=bq_location)
+
+    if args.command == "diagnose-embeddings":
+        sql = build_embeddings_table_health_sql(
+            project_id=project_id,
+            dataset_id=bq_dataset,
+            table_id=embeddings_table,
+        )
+        rows = list(client.query(sql, location=bq_location).result())
+        if not rows:
+            print("no result")
+            return
+        print(dict(rows[0]))
+        return
+
+    if args.command == "create-vector-index":
+        health_sql = build_embeddings_table_health_sql(
+            project_id=project_id,
+            dataset_id=bq_dataset,
+            table_id=embeddings_table,
+        )
+        stats = dict(list(client.query(health_sql, location=bq_location).result())[0])
+        rv = int(stats.get("rows_with_vectors") or 0)
+        rc = int(stats.get("row_count") or 0)
+        if rv == 0:
+            print(
+                "error: no rows with non-null, non-empty 'embedding'. "
+                "Run 'backfill' or 'import-embeddings' first. Stats:",
+                stats,
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        if rc < IVF_VECTOR_INDEX_MIN_ROW_COUNT:
+            print(
+                "error: BigQuery IVF vector index requires at least "
+                f"{IVF_VECTOR_INDEX_MIN_ROW_COUNT} rows in the base table; "
+                f"you have {rc}. Skip CREATE VECTOR INDEX — similarity search already "
+                "works via VECTOR_SEARCH (brute force) using: "
+                "invoice-bq-embeddings search | search-stored | rag-search | rag-search-stored.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        idx_sql = build_create_vector_index_ddl(
+            project_id=project_id,
+            dataset_id=bq_dataset,
+            table_id=embeddings_table,
+        )
+        run_ddl(client, idx_sql, location=bq_location)
+        logger.info("Vector index created on %s.%s.%s", project_id, bq_dataset, embeddings_table)
+        return
 
     if args.command == "setup":
         if not args.skip_vertex_resources:
@@ -266,13 +321,44 @@ def main() -> None:
         logger.info("View %s.%s.%s created", project_id, bq_dataset, gl_context_view)
 
         if args.with_vector_index:
-            idx_sql = build_create_vector_index_ddl(
+            health_sql = build_embeddings_table_health_sql(
                 project_id=project_id,
                 dataset_id=bq_dataset,
                 table_id=embeddings_table,
             )
-            run_ddl(client, idx_sql, location=bq_location)
-            logger.info("Vector index on %s.%s.%s created or already exists", project_id, bq_dataset, embeddings_table)
+            health = list(client.query(health_sql, location=bq_location).result())
+            stats = dict(health[0]) if health else {}
+            rv = int(stats.get("rows_with_vectors") or 0)
+            rc = int(stats.get("row_count") or 0)
+            if rv == 0:
+                logger.warning(
+                    "Skipping vector index: no rows with non-empty 'embedding' in "
+                    "%s.%s.%s. Run 'backfill' or 'import-embeddings' first, then "
+                    "'invoice-bq-embeddings create-vector-index'.",
+                    project_id,
+                    bq_dataset,
+                    embeddings_table,
+                )
+            elif rc < IVF_VECTOR_INDEX_MIN_ROW_COUNT:
+                logger.warning(
+                    "Skipping vector index: table has %s rows; BigQuery requires at least "
+                    "%s for IVF. Use search/rag-search (VECTOR_SEARCH without index).",
+                    rc,
+                    IVF_VECTOR_INDEX_MIN_ROW_COUNT,
+                )
+            else:
+                idx_sql = build_create_vector_index_ddl(
+                    project_id=project_id,
+                    dataset_id=bq_dataset,
+                    table_id=embeddings_table,
+                )
+                run_ddl(client, idx_sql, location=bq_location)
+                logger.info(
+                    "Vector index on %s.%s.%s created or already exists",
+                    project_id,
+                    bq_dataset,
+                    embeddings_table,
+                )
 
         logger.info("setup finished")
         return
