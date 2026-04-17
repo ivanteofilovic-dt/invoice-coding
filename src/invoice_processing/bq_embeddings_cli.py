@@ -60,7 +60,8 @@ def main() -> None:
             "search",
             "rag-search",
         ],
-        help="Action to run. Use 'setup' to create the embeddings table and views in one go.",
+        help="Action to run. Use 'setup' to create connection, remote embedding model, "
+        "embeddings table, and views (everything needed before backfill).",
     )
     parser.add_argument(
         "--gcs-uri",
@@ -73,10 +74,10 @@ def main() -> None:
         help="Neighbor count for search / rag-search (default 10).",
     )
     parser.add_argument(
-        "--with-vertex-resources",
+        "--skip-vertex-resources",
         action="store_true",
-        help="For setup: also run CREATE CONNECTION and CREATE REMOTE MODEL (needs "
-        "connections admin + Vertex; connection runs in BQ_VERTEX_CONNECTION_REGION).",
+        help="For setup: skip CREATE CONNECTION and CREATE REMOTE MODEL (only if "
+        "BQ_EMBEDDING_REMOTE_MODEL already exists in BQ_DATASET).",
     )
     parser.add_argument(
         "--with-vector-index",
@@ -166,15 +167,27 @@ def main() -> None:
     client = bigquery.Client(project=project_id, location=bq_location)
 
     if args.command == "setup":
-        if args.with_vertex_resources:
+        if not args.skip_vertex_resources:
             conn_sql = build_create_connection_ddl(
                 project_id=project_id,
                 connection_region=connection_region,
                 connection_id=connection_id,
             )
-            run_ddl(client, conn_sql, location=connection_region)
+            try:
+                run_ddl(client, conn_sql, location=connection_region)
+            except Exception:
+                logger.exception("CREATE CONNECTION failed")
+                print(
+                    "hint: needs BigQuery Connections Admin (or run the SQL from "
+                    "'invoice-bq-embeddings create-connection-sql' as an admin). "
+                    f"Connection id: {project_id}.{connection_region}.{connection_id}",
+                    file=sys.stderr,
+                )
+                raise
             logger.info(
-                "Connection ready: %s.%s.%s",
+                "Connection ready: %s.%s.%s — grant its service account "
+                "roles/aiplatform.user on the Vertex project if model creation fails "
+                "(see bq show --connection).",
                 project_id,
                 connection_region,
                 connection_id,
@@ -187,8 +200,26 @@ def main() -> None:
                 connection_id=connection_id,
                 endpoint=endpoint,
             )
-            run_ddl(client, model_sql, location=bq_location)
-            logger.info("Remote embedding model ready: %s.%s.%s", project_id, bq_dataset, remote_model)
+            try:
+                run_ddl(client, model_sql, location=bq_location)
+            except Exception:
+                logger.exception("CREATE REMOTE MODEL failed")
+                print(
+                    "hint: grant the connection service account roles/aiplatform.user "
+                    "on the project that owns the embedding endpoint, then re-run setup "
+                    f"(model `{project_id}.{bq_dataset}.{remote_model}`). "
+                    "Inspect SA: bq show --connection "
+                    f"{project_id}.{connection_region}.{connection_id}",
+                    file=sys.stderr,
+                )
+                raise
+            logger.info(
+                "Remote embedding model ready: %s.%s.%s (endpoint %s)",
+                project_id,
+                bq_dataset,
+                remote_model,
+                endpoint,
+            )
 
         ref = ensure_invoice_embeddings_table(
             client,
