@@ -12,6 +12,8 @@ dependencies = [
     "google-cloud-storage>=2.14.0",
     "google-genai>=1.0.0",
     "google-cloud-bigquery>=3.25.0",
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.32.0",
 ]
 
 [project.scripts]
@@ -20,6 +22,7 @@ invoice-batch-extract = "invoice_processing.batch_cli:main"
 invoice-bq-load-jsonl = "invoice_processing.bq_load_local_cli:main"
 invoice-bq-load-gl = "invoice_processing.bq_gl_load_cli:main"
 invoice-bq-embeddings = "invoice_processing.bq_embeddings_cli:main"
+ankrag = "invoice_processing.ankrag_cli:main"
 
 [dependency-groups]
 dev = [
