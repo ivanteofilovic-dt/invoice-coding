@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timezone
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -11,6 +12,7 @@ from google.genai.types import JobState
 
 from invoice_processing.batch_invoice_extract import (
     BatchExtractConfig,
+    batch_output_jsonl_paths_to_bq_rows,
     chunk_list,
     extraction_payload_to_bq_row,
     gcs_uri_from_batch_request,
@@ -108,6 +110,50 @@ def test_parse_batch_output_line_status_error() -> None:
     assert out is None
     assert uri == "gs://bucket/bad.pdf"
     assert err is not None
+
+
+def test_batch_output_jsonl_paths_to_bq_rows(tmp_path: Path) -> None:
+    payload = {"issue_date": "2025-09-24", "invoice_number": "F80386", "tax_lines": []}
+    line_obj = {
+        "status": "",
+        "request": {
+            "contents": [
+                {
+                    "role": "user",
+                    "parts": [
+                        {
+                            "fileData": {
+                                "fileUri": "gs://bucket/doc.pdf",
+                                "mimeType": "application/pdf",
+                            }
+                        },
+                    ],
+                }
+            ]
+        },
+        "response": {
+            "candidates": [
+                {
+                    "content": {
+                        "parts": [{"text": json.dumps(payload)}],
+                        "role": "model",
+                    }
+                }
+            ]
+        },
+    }
+    f = tmp_path / "out.jsonl"
+    f.write_text(json.dumps(line_obj) + "\n", encoding="utf-8")
+    ts = datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+    rows, errors = batch_output_jsonl_paths_to_bq_rows(
+        [f], model_id="gemini-test", batch_job_name="jobs/1", extracted_at=ts
+    )
+    assert errors == []
+    assert len(rows) == 1
+    assert rows[0]["gcs_uri"] == "gs://bucket/doc.pdf"
+    assert rows[0]["model_id"] == "gemini-test"
+    assert rows[0]["batch_job_name"] == "jobs/1"
+    assert rows[0]["invoice_number"] == "F80386"
 
 
 def test_extraction_payload_to_bq_row_numeric_strings() -> None:

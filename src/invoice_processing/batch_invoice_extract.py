@@ -8,6 +8,7 @@ import time
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable
 
 from google import genai
@@ -206,6 +207,41 @@ def parse_batch_output_line(
     if not isinstance(payload, dict):
         return gcs_uri, None, "model output not an object"
     return gcs_uri, payload, None
+
+
+def batch_output_jsonl_paths_to_bq_rows(
+    paths: list[str | Path],
+    *,
+    model_id: str,
+    batch_job_name: str,
+    extracted_at: datetime | None = None,
+) -> tuple[list[dict[str, Any]], list[str]]:
+    """Parse Vertex batch API JSONL output files into BigQuery-ready row dicts."""
+    when = extracted_at or datetime.now(timezone.utc)
+    rows: list[dict[str, Any]] = []
+    errors: list[str] = []
+    for path in paths:
+        p = Path(path)
+        text = p.read_text(encoding="utf-8")
+        for line_no, ln in enumerate(text.splitlines(), start=1):
+            s = ln.strip()
+            if not s:
+                continue
+            gcs_uri, payload, err = parse_batch_output_line(s)
+            if err:
+                errors.append(f"{p}:{line_no}: {gcs_uri or '?'}: {err}")
+                continue
+            assert gcs_uri is not None and payload is not None
+            rows.append(
+                extraction_payload_to_bq_row(
+                    payload,
+                    gcs_uri=gcs_uri,
+                    model_id=model_id,
+                    batch_job_name=batch_job_name,
+                    extracted_at=when,
+                )
+            )
+    return rows, errors
 
 
 def upload_text_blob(
