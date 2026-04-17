@@ -2,6 +2,8 @@ export interface HealthResponse {
   ok: boolean;
   gcp_project_set: boolean;
   gcs_bucket_set: boolean;
+  /** True when project + BQ dataset are set (upload/analyze can run without GCS). */
+  analyze_ready?: boolean;
 }
 
 export interface ConfigResponse {
@@ -15,6 +17,8 @@ export interface ConfigResponse {
   confidence_high_threshold: number;
   confidence_low_threshold: number;
   vector_search_backend: string;
+  /** When false, PDF bytes are sent to Gemini inline (no GCS upload). */
+  pdf_uploads_via_gcs?: boolean;
 }
 
 export interface StatsResponse {

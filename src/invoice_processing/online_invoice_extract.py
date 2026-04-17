@@ -88,23 +88,22 @@ def extraction_payload_to_ui_extraction(
     }
 
 
-def extract_invoice_from_gcs_pdf(
+def _extract_with_pdf_parts(
     client: genai.Client,
     *,
     model_id: str,
-    gcs_uri: str,
+    pdf_parts: list[types.Part],
+    bq_gcs_uri: str,
+    ui_document_id: str,
     batch_job_name: str | None = None,
 ) -> OnlineExtractResult:
-    """Run one ``generate_content`` call against a PDF already in GCS (``gs://`` URI)."""
+    """Shared Gemini JSON extraction; ``bq_gcs_uri`` is stored in BigQuery (may be ``inline://…``)."""
     schema = invoice_response_json_schema()
     user_text = (
         f"{EXTRACTION_SYSTEM_INSTRUCTION}\n\n"
         "Extract all invoice fields from this PDF into JSON per the schema."
     )
-    parts: list[types.Part] = [
-        types.Part(text=user_text),
-        types.Part.from_uri(file_uri=gcs_uri, mime_type="application/pdf"),
-    ]
+    parts: list[types.Part] = [types.Part(text=user_text), *pdf_parts]
     config = types.GenerateContentConfig(
         temperature=0.1,
         max_output_tokens=8192,
@@ -128,19 +127,67 @@ def extract_invoice_from_gcs_pdf(
     extracted_at = datetime.now(timezone.utc)
     bq_row = extraction_payload_to_bq_row(
         payload,
-        gcs_uri=gcs_uri,
+        gcs_uri=bq_gcs_uri,
         model_id=model_id,
         batch_job_name=job_name,
         extracted_at=extracted_at,
     )
-    doc_id = gcs_uri.rsplit("/", 1)[-1] if "/" in gcs_uri else gcs_uri
-    ui_extraction = extraction_payload_to_ui_extraction(payload, document_id=doc_id)
+    ui_extraction = extraction_payload_to_ui_extraction(
+        payload, document_id=ui_document_id
+    )
     return OnlineExtractResult(
-        gcs_uri=gcs_uri,
+        gcs_uri=bq_gcs_uri,
         payload=payload,
         bq_row=bq_row,
         ui_extraction=ui_extraction,
     )
+
+
+def extract_invoice_from_gcs_pdf(
+    client: genai.Client,
+    *,
+    model_id: str,
+    gcs_uri: str,
+    batch_job_name: str | None = None,
+) -> OnlineExtractResult:
+    """Run one ``generate_content`` call against a PDF already in GCS (``gs://`` URI)."""
+    doc_id = gcs_uri.rsplit("/", 1)[-1] if "/" in gcs_uri else gcs_uri
+    return _extract_with_pdf_parts(
+        client,
+        model_id=model_id,
+        pdf_parts=[types.Part.from_uri(file_uri=gcs_uri, mime_type="application/pdf")],
+        bq_gcs_uri=gcs_uri,
+        ui_document_id=doc_id,
+        batch_job_name=batch_job_name,
+    )
+
+
+def extract_invoice_from_pdf_bytes(
+    client: genai.Client,
+    *,
+    model_id: str,
+    pdf_bytes: bytes,
+    document_uri: str,
+    display_filename: str,
+    batch_job_name: str | None = None,
+) -> OnlineExtractResult:
+    """Extract from in-memory PDF (no GCS). ``document_uri`` is stored as ``gcs_uri`` in BigQuery (e.g. ``inline://…``)."""
+    return _extract_with_pdf_parts(
+        client,
+        model_id=model_id,
+        pdf_parts=[
+            types.Part.from_bytes(data=pdf_bytes, mime_type="application/pdf"),
+        ],
+        bq_gcs_uri=document_uri,
+        ui_document_id=display_filename,
+        batch_job_name=batch_job_name,
+    )
+
+
+def make_inline_document_uri(*, run_id: str, filename: str) -> str:
+    """Stable logical URI for BQ / RAG when no bucket (not a real ``gs://`` object)."""
+    safe = filename.strip().replace("\\", "/").split("/")[-1] or "invoice.pdf"
+    return f"inline://{run_id}/{safe}"
 
 
 def default_genai_client(project_id: str, vertex_location: str) -> genai.Client:

@@ -20,7 +20,11 @@ from invoice_processing.bq_rag_suggestions import (
     insert_suggestion_row,
 )
 from invoice_processing.invoice_coding_schema import suggest_coding
-from invoice_processing.online_invoice_extract import extract_invoice_from_gcs_pdf
+from invoice_processing.online_invoice_extract import (
+    extract_invoice_from_gcs_pdf,
+    extract_invoice_from_pdf_bytes,
+    make_inline_document_uri,
+)
 from invoice_processing.rag_retrieval import (
     RagRetrievalConfig,
     fetch_rag_neighbors,
@@ -50,7 +54,7 @@ def run_analyze_pdf(
     project_id: str,
     vertex_location: str,
     gemini_model: str,
-    gcs_bucket: str,
+    gcs_bucket: str | None,
     new_invoice_prefix: str,
     bq_dataset: str,
     bq_extractions_table: str,
@@ -71,14 +75,26 @@ def run_analyze_pdf(
     if not safe_name.lower().endswith(".pdf"):
         safe_name = f"{safe_name}.pdf"
     run_part = uuid.uuid4().hex[:12]
-    object_name = f"{new_invoice_prefix.strip().strip('/')}/{run_part}_{safe_name}"
-    gcs_uri = upload_pdf_to_gcs(
-        gcs_bucket, object_name, pdf_bytes, client=storage_client
-    )
-
-    ext = extract_invoice_from_gcs_pdf(
-        genai_client, model_id=gemini_model, gcs_uri=gcs_uri
-    )
+    bucket = (gcs_bucket or "").strip()
+    if bucket:
+        object_name = f"{new_invoice_prefix.strip().strip('/')}/{run_part}_{safe_name}"
+        gcs_uri = upload_pdf_to_gcs(
+            bucket, object_name, pdf_bytes, client=storage_client
+        )
+        ext = extract_invoice_from_gcs_pdf(
+            genai_client, model_id=gemini_model, gcs_uri=gcs_uri
+        )
+        pdf_storage = "gcs"
+    else:
+        gcs_uri = make_inline_document_uri(run_id=run_part, filename=safe_name)
+        ext = extract_invoice_from_pdf_bytes(
+            genai_client,
+            model_id=gemini_model,
+            pdf_bytes=pdf_bytes,
+            document_uri=gcs_uri,
+            display_filename=safe_name,
+        )
+        pdf_storage = "inline"
     ext_table_ref = ensure_invoice_extractions_table(
         bq_client,
         bq_dataset,
@@ -116,6 +132,7 @@ def run_analyze_pdf(
         "max_neighbor_similarity": max(
             (n.get("similarity") or 0 for n in neighbors), default=None
         ),
+        "pdf_storage": pdf_storage,
     }
     suggestion_id = uuid.uuid4().hex
     document_id = ext.ui_extraction.get("document_id") or safe_name
@@ -196,4 +213,5 @@ def read_settings_from_env() -> dict[str, Any]:
         ).strip(),
         "confidence_high": float(os.environ.get("CONFIDENCE_HIGH_THRESHOLD", "0.85")),
         "confidence_low": float(os.environ.get("CONFIDENCE_LOW_THRESHOLD", "0.5")),
+        "pdf_via_gcs": bool(os.environ.get("GCS_BUCKET", "").strip()),
     }

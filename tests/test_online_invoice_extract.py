@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
-from invoice_processing.online_invoice_extract import extraction_payload_to_ui_extraction
+from invoice_processing.online_invoice_extract import (
+    extraction_payload_to_ui_extraction,
+    make_inline_document_uri,
+)
 
 
 def test_extraction_payload_to_ui_extraction() -> None:
@@ -30,3 +33,8 @@ def test_extraction_payload_to_ui_extraction() -> None:
     assert len(ui["lines"]) == 1
     assert ui["lines"][0]["join_key"] == "L1|W1"
     assert ui["lines"][0]["amount"] == "99.5"
+
+
+def test_make_inline_document_uri() -> None:
+    u = make_inline_document_uri(run_id="abc123", filename="path/to/Inv.pdf")
+    assert u == "inline://abc123/Inv.pdf"

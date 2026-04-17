@@ -1,10 +1,14 @@
 # Python-generated files
 __pycache__/
 *.py[oc]
-build/
-dist/
-wheels/
+# Anchor to repo root so we do not ignore e.g. node_modules/vite/dist/ (breaks Vite).
+/build/
+/dist/
+/wheels/
 *.egg-info
+
+# JavaScript dependencies (never commit; avoids partial trees missing vite dist/node/cli.js)
+node_modules/
 
 # Virtual environments
 .venv

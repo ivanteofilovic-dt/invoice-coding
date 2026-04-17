@@ -54,6 +54,7 @@ def api_health() -> dict[str, Any]:
         "ok": bool(s["project_id"]),
         "gcp_project_set": bool(s["project_id"]),
         "gcs_bucket_set": bool(s["gcs_bucket"]),
+        "analyze_ready": bool(s["project_id"] and s["bq_dataset"]),
     }
 
 
@@ -71,6 +72,7 @@ def api_config() -> dict[str, Any]:
         "confidence_high_threshold": s["confidence_high"],
         "confidence_low_threshold": s["confidence_low"],
         "vector_search_backend": "bigquery_vector_search",
+        "pdf_uploads_via_gcs": s["pdf_via_gcs"],
     }
 
 
@@ -170,10 +172,10 @@ async def api_analyze(
     persist: bool = Query(True),
 ) -> dict[str, Any]:
     s = read_settings_from_env()
-    if not s["project_id"] or not s["gcs_bucket"] or not s["bq_dataset"]:
+    if not s["project_id"] or not s["bq_dataset"]:
         raise HTTPException(
             status_code=400,
-            detail="Set GCP_PROJECT, GCS_BUCKET, and BQ_DATASET",
+            detail="Set GCP_PROJECT and BQ_DATASET (GCS_BUCKET optional: PDF is sent inline when unset)",
         )
     raw = await file.read()
     if not raw:

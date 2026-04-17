@@ -30,8 +30,8 @@ def _cmd_serve(args: argparse.Namespace) -> None:
 def _cmd_suggest(args: argparse.Namespace) -> None:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     s = read_settings_from_env()
-    if not s["project_id"] or not s["gcs_bucket"] or not s["bq_dataset"]:
-        print("error: set GCP_PROJECT, GCS_BUCKET, BQ_DATASET", file=sys.stderr)
+    if not s["project_id"] or not s["bq_dataset"]:
+        print("error: set GCP_PROJECT and BQ_DATASET (GCS_BUCKET optional)", file=sys.stderr)
         sys.exit(1)
     path = Path(args.local_pdf)
     if not path.is_file():
