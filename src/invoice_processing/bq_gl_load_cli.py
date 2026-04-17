@@ -32,7 +32,8 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         description="Load local GL tab-separated exports into BigQuery. "
         "Uses GCP_PROJECT, BQ_DATASET, BQ_GL_TABLE (default gl_lines), "
-        "BQ_LOCATION (default US), DATA_ROOT (default data)."
+        "BQ_LOCATION (default US), DATA_ROOT (default data). "
+        "Optional GL_FILE_ENCODING: if unset, UTF-8 is tried first then cp1252 / Latin-1."
     )
     parser.add_argument(
         "txt_files",
@@ -52,6 +53,7 @@ def main() -> None:
     bq_table = os.environ.get("BQ_GL_TABLE", "gl_lines").strip()
     bq_location = os.environ.get("BQ_LOCATION", "US").strip()
     data_root = Path(os.environ.get("DATA_ROOT", "data")).expanduser().resolve()
+    gl_encoding = os.environ.get("GL_FILE_ENCODING", "").strip() or None
 
     if args.txt_files:
         paths = [Path(p).expanduser().resolve() for p in args.txt_files]
@@ -82,7 +84,12 @@ def main() -> None:
         client, bq_dataset, bq_table, project_id=project_id, location=bq_location
     )
     job = load_gl_txt_paths(
-        client, table_ref, paths, write_disposition=disposition, location=bq_location
+        client,
+        table_ref,
+        paths,
+        write_disposition=disposition,
+        location=bq_location,
+        file_encoding=gl_encoding,
     )
     logger.info(
         "Load job %s finished (%s output rows) -> %s",

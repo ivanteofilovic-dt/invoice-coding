@@ -8,6 +8,7 @@ import pytest
 
 from invoice_processing.bq_gl_lines import (
     GL_EXPORT_COLUMNS,
+    decode_gl_export_bytes,
     gl_row_passes_filters,
     iter_filtered_gl_rows,
 )
@@ -79,6 +80,41 @@ def test_gl_row_passes_filters_ankreg_substring() -> None:
         "GL_LINE_DESCRIPTION": "prefix ankreg suffix",
     }
     assert gl_row_passes_filters(row) is False
+
+
+def test_decode_gl_export_bytes_utf8() -> None:
+    assert decode_gl_export_bytes("hello".encode()) == "hello"
+
+
+def test_decode_gl_export_bytes_latin1_byte_f6() -> None:
+    # 0xf6 is invalid as a lone UTF-8 start byte; valid in cp1252 / Latin-1 as "ö".
+    s = decode_gl_export_bytes(b"prefix\xf6suffix")
+    assert "ö" in s
+    assert s == "prefixösuffix"
+
+
+def test_decode_gl_export_bytes_preferred_strict() -> None:
+    assert decode_gl_export_bytes("x".encode("utf-8"), preferred="utf-8") == "x"
+
+
+def test_iter_filtered_gl_rows_latin1_supplier_field(tmp_path: Path) -> None:
+    p = tmp_path / "latin1.txt"
+    header = _header_line()
+    body = _row_cells(
+        SUPPLIER_NUMBER="S1",
+        SUPPLIER_CUSTMER_NAME="",
+        GL_LINE_DESCRIPTION="ok",
+    )
+    # "ö" in GL_LINE_DESCRIPTION as Latin-1 bytes
+    body_cells = body.split("\t")
+    idx = GL_EXPORT_COLUMNS.index("GL_LINE_DESCRIPTION")
+    body_cells[idx] = "Br\xf6d"  # Bröd
+    body = "\t".join(body_cells)
+    p.write_bytes((header + "\n" + body + "\n").encode("iso8859-1"))
+
+    rows = list(iter_filtered_gl_rows(p))
+    assert len(rows) == 1
+    assert rows[0]["GL_LINE_DESCRIPTION"] == "Bröd"
 
 
 def test_iter_filtered_gl_rows_end_to_end(tmp_path: Path) -> None:

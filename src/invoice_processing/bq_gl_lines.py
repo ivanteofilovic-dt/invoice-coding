@@ -57,6 +57,18 @@ def _nonempty_stripped(value: str | None) -> bool:
     return bool(_cell(value).strip())
 
 
+def decode_gl_export_bytes(raw: bytes, *, preferred: str | None = None) -> str:
+    """Decode GL export bytes: strict ``preferred``, or UTF-8 then Windows-1252 / Latin-1."""
+    if preferred:
+        return raw.decode(preferred)
+    for enc in ("utf-8-sig", "utf-8", "cp1252", "iso8859-1"):
+        try:
+            return raw.decode(enc)
+        except UnicodeDecodeError:
+            continue
+    return raw.decode("utf-8", errors="replace")
+
+
 def gl_row_passes_filters(row: dict[str, str | None]) -> bool:
     """Invoice-related lines only; drop preliminary AnkReg booking lines."""
     if not (
@@ -105,21 +117,30 @@ def ensure_gl_lines_table(
     return table_ref
 
 
-def iter_filtered_gl_rows(path: Path) -> Iterator[dict[str, str]]:
-    """Yield filtered rows as string dicts including ``source_file`` and ``loaded_at``."""
+def iter_filtered_gl_rows(
+    path: Path,
+    *,
+    encoding: str | None = None,
+) -> Iterator[dict[str, str]]:
+    """Yield filtered rows as string dicts including ``source_file`` and ``loaded_at``.
+
+    If ``encoding`` is set, the file is decoded with that codec only. Otherwise bytes are
+    decoded with :func:`decode_gl_export_bytes` (UTF-8 first, then cp1252 / Latin-1).
+    """
     path = path.resolve()
     dt = datetime.now(timezone.utc)
     loaded_at = f"{dt.strftime('%Y-%m-%d %H:%M:%S')}.{dt.microsecond:06d} UTC"
     source_file = path.name
-    with path.open(encoding="utf-8", newline="") as f:
-        reader = csv.DictReader(f, delimiter="\t")
-        for raw in reader:
-            row = {k: _cell(raw.get(k)) for k in GL_EXPORT_COLUMNS}
-            if not gl_row_passes_filters(row):
-                continue
-            row["source_file"] = source_file
-            row["loaded_at"] = loaded_at
-            yield row
+    blob = path.read_bytes()
+    text = decode_gl_export_bytes(blob, preferred=encoding)
+    reader = csv.DictReader(io.StringIO(text), delimiter="\t")
+    for raw in reader:
+        row = {k: _cell(raw.get(k)) for k in GL_EXPORT_COLUMNS}
+        if not gl_row_passes_filters(row):
+            continue
+        row["source_file"] = source_file
+        row["loaded_at"] = loaded_at
+        yield row
 
 
 def _gl_load_job_config(
@@ -150,6 +171,7 @@ def load_gl_txt_paths(
     *,
     write_disposition: str = bigquery.WriteDisposition.WRITE_TRUNCATE,
     location: str = "US",
+    file_encoding: str | None = None,
 ) -> bigquery.LoadJob:
     """Load one or more GL ``*.txt`` files after filtering into ``table_ref``."""
     fieldnames = list(GL_EXPORT_COLUMNS) + ["source_file", "loaded_at"]
@@ -162,7 +184,7 @@ def load_gl_txt_paths(
         quoting=csv.QUOTE_MINIMAL,
     )
     for p in paths:
-        for row in iter_filtered_gl_rows(p):
+        for row in iter_filtered_gl_rows(p, encoding=file_encoding):
             writer.writerow(row)
     data = buf.getvalue().encode("utf-8")
     job_config = _gl_load_job_config(write_disposition)
