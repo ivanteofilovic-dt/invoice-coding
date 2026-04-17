@@ -1,11 +1,30 @@
-"""BigQuery ML invoice embeddings: embed text view, storage table, backfill, VECTOR_SEARCH."""
+"""BigQuery ML invoice embeddings: embed text view, storage table, backfill, VECTOR_SEARCH.
+
+Two ways to fill ``invoice_embeddings``:
+
+1. **In-BigQuery** — ``AI.GENERATE_EMBEDDING`` on a remote model (requires a BigQuery
+   **connection** and Vertex access for that connection’s service account).
+
+2. **Outside BigQuery** — compute vectors with the Vertex **REST/SDK**, a Colab notebook,
+   Cloud Run, etc., using any principal you control, then **load** rows into
+   ``invoice_embeddings`` via :func:`load_precomputed_embedding_ndjson_files`.
+   **``VECTOR_SEARCH`` does not use the connection**; it only reads stored arrays.
+   Use :func:`build_vector_search_by_stored_embedding_sql` / ``search-stored`` so the
+   query vector is read from the same table (no embedding API call in SQL).
+"""
 
 from __future__ import annotations
 
+import io
+import json
+import logging
 import re
-from typing import TYPE_CHECKING
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 from google.cloud import bigquery
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from google.cloud.bigquery import Client as BigQueryClient
@@ -313,7 +332,7 @@ CREATE VECTOR INDEX IF NOT EXISTS {idx}
 ON {tbl}(embedding)
 OPTIONS (
   distance_type = 'COSINE',
-  ivf_options = {{'num_lists': 100}}
+  ivf_options = '{{"num_lists": 100}}'
 )
 """.strip()
 
@@ -394,6 +413,184 @@ FROM generated AS g
 INNER JOIN pending AS p
   ON p.gcs_uri = g.gcs_uri
 """.strip()
+
+
+def build_vector_search_by_stored_embedding_sql(
+    *,
+    project_id: str,
+    dataset_id: str,
+    query_gcs_uri: str,
+    embeddings_table_id: str = _DEFAULT_EMBEDDINGS_TABLE,
+    top_k: int = 10,
+) -> str:
+    """Top-K similar rows using the query invoice's vector already stored in ``invoice_embeddings``.
+
+    No remote model or BigQuery connection is used. Fails at query time if ``gcs_uri`` has no row.
+    """
+    emb_tbl = _qualified(project_id, dataset_id, embeddings_table_id)
+    uri_esc = query_gcs_uri.replace("'", "''")
+    return f"""
+WITH qemb AS (
+  SELECT embedding
+  FROM {emb_tbl}
+  WHERE gcs_uri = '{uri_esc}'
+  LIMIT 1
+)
+SELECT
+  gcs_uri,
+  embed_text_version,
+  content_hash,
+  distance
+FROM (
+  SELECT
+    gcs_uri,
+    embed_text_version,
+    content_hash,
+    distance
+  FROM VECTOR_SEARCH(
+    TABLE {emb_tbl},
+    'embedding',
+    (SELECT embedding FROM qemb),
+    distance_type => 'COSINE',
+    top_k => {int(top_k) + 10}
+  )
+)
+WHERE gcs_uri != '{uri_esc}'
+ORDER BY distance
+LIMIT {int(top_k)}
+""".strip()
+
+
+def build_rag_neighbors_with_gl_stored_embedding_sql(
+    *,
+    project_id: str,
+    dataset_id: str,
+    query_gcs_uri: str,
+    embed_text_view_id: str = _DEFAULT_EMBED_TEXT_VIEW,
+    embeddings_table_id: str = _DEFAULT_EMBEDDINGS_TABLE,
+    gl_context_view_id: str = _DEFAULT_GL_CONTEXT_VIEW,
+    top_k: int = 10,
+) -> str:
+    """Like :func:`build_rag_neighbors_with_gl_sql` but query vector comes from stored embeddings only."""
+    base = build_vector_search_by_stored_embedding_sql(
+        project_id=project_id,
+        dataset_id=dataset_id,
+        query_gcs_uri=query_gcs_uri,
+        embeddings_table_id=embeddings_table_id,
+        top_k=top_k,
+    )
+    v = _qualified(project_id, dataset_id, embed_text_view_id)
+    glv = _qualified(project_id, dataset_id, gl_context_view_id)
+    inner = base.strip().rstrip(";")
+    return f"""
+WITH hits AS (
+  ({inner})
+),
+ev AS (
+  SELECT gcs_uri, invoice_key_norm, supplier_ref_norm
+  FROM {v}
+)
+SELECT
+  h.*,
+  g.gl_line_count,
+  g.net_accounted_sum,
+  g.gl_lines_recent
+FROM hits AS h
+LEFT JOIN ev ON ev.gcs_uri = h.gcs_uri
+LEFT JOIN {glv} AS g
+  ON g.invoice_key_norm = ev.invoice_key_norm
+ AND g.supplier_number_norm = ev.supplier_ref_norm
+ORDER BY h.distance
+""".strip()
+
+
+def _embedding_load_job_config(write_disposition: str) -> bigquery.LoadJobConfig:
+    return bigquery.LoadJobConfig(
+        source_format=bigquery.SourceFormat.NEWLINE_DELIMITED_JSON,
+        write_disposition=write_disposition,
+        schema=invoice_embeddings_schema(),
+    )
+
+
+def _run_embedding_load_job(job: bigquery.LoadJob) -> None:
+    try:
+        job.result()
+    except Exception:
+        for err in getattr(job, "errors", None) or ():
+            logger.error("BigQuery load job error: %s", err)
+        raise
+
+
+def _drop_null_json_values_embedding(value: Any) -> Any:
+    if isinstance(value, dict):
+        out: dict[str, Any] = {}
+        for k, v in value.items():
+            if v is None or v == "null":
+                continue
+            out[k] = _drop_null_json_values_embedding(v)
+        return out
+    if isinstance(value, list):
+        return [_drop_null_json_values_embedding(v) for v in value if v is not None]
+    return value
+
+
+def _sanitize_precomputed_embedding_row(row: dict[str, Any]) -> dict[str, Any]:
+    """NDJSON row for ``invoice_embeddings``; ``gcs_uri`` and ``embedding`` (number array) required."""
+    emb = row.get("embedding")
+    if not isinstance(emb, list) or not emb:
+        msg = "row must include non-empty 'embedding' array"
+        raise ValueError(msg)
+    if not row.get("gcs_uri"):
+        msg = "row must include 'gcs_uri'"
+        raise ValueError(msg)
+    cleaned = _drop_null_json_values_embedding(dict(row))
+    cleaned["embedding"] = [float(x) for x in emb]
+    return cleaned
+
+
+def load_precomputed_embedding_ndjson_rows(
+    client: BigQueryClient,
+    table_ref: str,
+    rows: list[dict[str, Any]],
+    *,
+    write_disposition: str = bigquery.WriteDisposition.WRITE_APPEND,
+    location: str = "US",
+) -> bigquery.LoadJob:
+    """Load precomputed embedding rows (no BigQuery ML / connection)."""
+    buf = io.BytesIO()
+    for row in rows:
+        sanitized = _sanitize_precomputed_embedding_row(row)
+        buf.write(json.dumps(sanitized, default=str).encode("utf-8"))
+        buf.write(b"\n")
+    buf.seek(0)
+    job_config = _embedding_load_job_config(write_disposition)
+    job = client.load_table_from_file(
+        buf, table_ref, job_config=job_config, rewind=True, location=location
+    )
+    _run_embedding_load_job(job)
+    return job
+
+
+def load_precomputed_embedding_ndjson_files(
+    client: BigQueryClient,
+    table_ref: str,
+    paths: list[str | Path],
+    *,
+    write_disposition: str = bigquery.WriteDisposition.WRITE_APPEND,
+    location: str = "US",
+) -> list[bigquery.LoadJob]:
+    """Load one or more local NDJSON files into ``invoice_embeddings``."""
+    job_config = _embedding_load_job_config(write_disposition)
+    jobs: list[bigquery.LoadJob] = []
+    for path in paths:
+        p = Path(path)
+        with p.open("rb") as f:
+            job = client.load_table_from_file(
+                f, table_ref, job_config=job_config, rewind=True, location=location
+            )
+        _run_embedding_load_job(job)
+        jobs.append(job)
+    return jobs
 
 
 def build_vector_search_by_gcs_uri_sql(

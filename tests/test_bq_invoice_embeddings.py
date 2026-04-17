@@ -10,13 +10,16 @@ from invoice_processing.bq_invoice_embeddings import (
     EMBED_TEXT_VERSION,
     DEFAULT_OUTPUT_DIMENSIONALITY,
     _assert_ident,
+    _sanitize_precomputed_embedding_row,
     build_backfill_embeddings_insert_sql,
     build_create_remote_embedding_model_ddl,
     build_create_vector_index_ddl,
     build_invoice_embed_text_view_ddl,
     build_invoice_gl_context_view_ddl,
     build_rag_neighbors_with_gl_sql,
+    build_rag_neighbors_with_gl_stored_embedding_sql,
     build_vector_search_by_gcs_uri_sql,
+    build_vector_search_by_stored_embedding_sql,
     ensure_invoice_embeddings_table,
     invoice_embedding_inner_select_sql,
     invoice_embeddings_schema,
@@ -76,6 +79,40 @@ def test_build_backfill_contains_generate_embedding_and_insert() -> None:
     assert str(DEFAULT_OUTPUT_DIMENSIONALITY) in sql
 
 
+def test_build_vector_search_stored_has_no_ai_generate() -> None:
+    sql = build_vector_search_by_stored_embedding_sql(
+        project_id="p",
+        dataset_id="d",
+        query_gcs_uri="gs://b/x.pdf",
+        top_k=5,
+    )
+    assert "AI.GENERATE_EMBEDDING" not in sql
+    assert "VECTOR_SEARCH" in sql
+    assert "FROM `p.d.invoice_embeddings`" in sql
+
+
+def test_build_rag_stored_uses_stored_vector_search() -> None:
+    sql = build_rag_neighbors_with_gl_stored_embedding_sql(
+        project_id="p",
+        dataset_id="d",
+        query_gcs_uri="gs://b/a.pdf",
+    )
+    assert "AI.GENERATE_EMBEDDING" not in sql
+    assert "WITH hits AS" in sql
+
+
+def test_sanitize_precomputed_embedding_row() -> None:
+    row = {
+        "gcs_uri": "gs://b/a.pdf",
+        "embedding": [0.0, 0.25],
+        "embed_text_version": "v1",
+        "extras_ignored": None,
+    }
+    out = _sanitize_precomputed_embedding_row(row)
+    assert out["embedding"] == [0.0, 0.25]
+    assert "extras_ignored" not in out
+
+
 def test_build_vector_search_uses_retrieval_query_and_cosine() -> None:
     sql = build_vector_search_by_gcs_uri_sql(
         project_id="p",
@@ -124,6 +161,7 @@ def test_build_create_vector_index_ddl() -> None:
     )
     assert "CREATE VECTOR INDEX" in sql
     assert "`p.d.idx1`" in sql
+    assert "ivf_options = '{\"num_lists\": 100}'" in sql
 
 
 def test_invoice_embeddings_schema_has_embedding_array() -> None:
