@@ -4,9 +4,13 @@ from __future__ import annotations
 
 import io
 import json
+import logging
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from google.cloud import bigquery
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from google.cloud.bigquery import Client as BigQueryClient
@@ -162,6 +166,25 @@ def ensure_invoice_extractions_table(
     return table_ref
 
 
+def _invoice_extractions_load_job_config(
+    write_disposition: str,
+) -> bigquery.LoadJobConfig:
+    return bigquery.LoadJobConfig(
+        source_format=bigquery.SourceFormat.NEWLINE_DELIMITED_JSON,
+        write_disposition=write_disposition,
+        schema=invoice_extractions_schema(),
+    )
+
+
+def _run_load_job(job: bigquery.LoadJob) -> None:
+    try:
+        job.result()
+    except Exception:
+        for err in getattr(job, "errors", None) or ():
+            logger.error("BigQuery load job error: %s", err)
+        raise
+
+
 def load_ndjson_rows(
     client: BigQueryClient,
     table_ref: str,
@@ -176,13 +199,34 @@ def load_ndjson_rows(
         buf.write(json.dumps(row, default=str).encode("utf-8"))
         buf.write(b"\n")
     buf.seek(0)
-    job_config = bigquery.LoadJobConfig(
-        source_format=bigquery.SourceFormat.NEWLINE_DELIMITED_JSON,
-        write_disposition=write_disposition,
-        schema=invoice_extractions_schema(),
-    )
+    job_config = _invoice_extractions_load_job_config(write_disposition)
     job = client.load_table_from_file(
         buf, table_ref, job_config=job_config, rewind=True, location=location
     )
-    job.result()
+    _run_load_job(job)
     return job
+
+
+def load_ndjson_jsonl_files(
+    client: BigQueryClient,
+    table_ref: str,
+    paths: list[str | Path],
+    *,
+    write_disposition: str = bigquery.WriteDisposition.WRITE_APPEND,
+    location: str = "US",
+) -> list[bigquery.LoadJob]:
+    """Load one or more local newline-delimited JSON files into the table.
+
+    Each file is submitted as its own load job (same disposition for each).
+    """
+    job_config = _invoice_extractions_load_job_config(write_disposition)
+    jobs: list[bigquery.LoadJob] = []
+    for path in paths:
+        p = Path(path)
+        with p.open("rb") as f:
+            job = client.load_table_from_file(
+                f, table_ref, job_config=job_config, rewind=True, location=location
+            )
+        _run_load_job(job)
+        jobs.append(job)
+    return jobs

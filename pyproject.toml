@@ -17,6 +17,7 @@ dependencies = [
 [project.scripts]
 invoice-upload-historical = "invoice_processing.cli:main"
 invoice-batch-extract = "invoice_processing.batch_cli:main"
+invoice-bq-load-jsonl = "invoice_processing.bq_load_local_cli:main"
 
 [dependency-groups]
 dev = [
