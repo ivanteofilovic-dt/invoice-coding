@@ -48,6 +48,7 @@ def main() -> None:
     parser.add_argument(
         "command",
         choices=[
+            "setup",
             "print-ddl",
             "ensure-embeddings-table",
             "create-embed-text-view",
@@ -59,7 +60,7 @@ def main() -> None:
             "search",
             "rag-search",
         ],
-        help="Action to run.",
+        help="Action to run. Use 'setup' to create the embeddings table and views in one go.",
     )
     parser.add_argument(
         "--gcs-uri",
@@ -70,6 +71,17 @@ def main() -> None:
         type=int,
         default=10,
         help="Neighbor count for search / rag-search (default 10).",
+    )
+    parser.add_argument(
+        "--with-vertex-resources",
+        action="store_true",
+        help="For setup: also run CREATE CONNECTION and CREATE REMOTE MODEL (needs "
+        "connections admin + Vertex; connection runs in BQ_VERTEX_CONNECTION_REGION).",
+    )
+    parser.add_argument(
+        "--with-vector-index",
+        action="store_true",
+        help="For setup: also CREATE VECTOR INDEX on invoice_embeddings (optional scale-up).",
     )
     args = parser.parse_args()
 
@@ -152,6 +164,71 @@ def main() -> None:
         return
 
     client = bigquery.Client(project=project_id, location=bq_location)
+
+    if args.command == "setup":
+        if args.with_vertex_resources:
+            conn_sql = build_create_connection_ddl(
+                project_id=project_id,
+                connection_region=connection_region,
+                connection_id=connection_id,
+            )
+            run_ddl(client, conn_sql, location=connection_region)
+            logger.info(
+                "Connection ready: %s.%s.%s",
+                project_id,
+                connection_region,
+                connection_id,
+            )
+            model_sql = build_create_remote_embedding_model_ddl(
+                project_id=project_id,
+                dataset_id=bq_dataset,
+                model_id=remote_model,
+                connection_region=connection_region,
+                connection_id=connection_id,
+                endpoint=endpoint,
+            )
+            run_ddl(client, model_sql, location=bq_location)
+            logger.info("Remote embedding model ready: %s.%s.%s", project_id, bq_dataset, remote_model)
+
+        ref = ensure_invoice_embeddings_table(
+            client,
+            bq_dataset,
+            embeddings_table,
+            project_id=project_id,
+            location=bq_location,
+            embedding_dimensions=out_dim,
+        )
+        logger.info("Embeddings table ready: %s", ref)
+
+        embed_sql = build_invoice_embed_text_view_ddl(
+            project_id=project_id,
+            dataset_id=bq_dataset,
+            extractions_table_id=extractions_table,
+            view_id=embed_view,
+        )
+        run_ddl(client, embed_sql, location=bq_location)
+        logger.info("View %s.%s.%s created", project_id, bq_dataset, embed_view)
+
+        gl_sql = build_invoice_gl_context_view_ddl(
+            project_id=project_id,
+            dataset_id=bq_dataset,
+            gl_table_id=gl_table,
+            view_id=gl_context_view,
+        )
+        run_ddl(client, gl_sql, location=bq_location)
+        logger.info("View %s.%s.%s created", project_id, bq_dataset, gl_context_view)
+
+        if args.with_vector_index:
+            idx_sql = build_create_vector_index_ddl(
+                project_id=project_id,
+                dataset_id=bq_dataset,
+                table_id=embeddings_table,
+            )
+            run_ddl(client, idx_sql, location=bq_location)
+            logger.info("Vector index on %s.%s.%s created or already exists", project_id, bq_dataset, embeddings_table)
+
+        logger.info("setup finished")
+        return
 
     if args.command == "ensure-embeddings-table":
         ref = ensure_invoice_embeddings_table(
