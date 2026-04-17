@@ -9,11 +9,26 @@ import pytest
 from unittest.mock import MagicMock
 
 from invoice_processing.bq_invoice_extractions import (
+    _sanitize_invoice_extraction_ndjson_row,
     ensure_invoice_extractions_table,
     invoice_extractions_schema,
     load_ndjson_jsonl_files,
     load_ndjson_rows,
 )
+
+
+def test_sanitize_ndjson_row_omits_null_date_in_nested_record() -> None:
+    row = {
+        "gcs_uri": "gs://b/x.pdf",
+        "issue_date": None,
+        "delivery": {"delivery_date": None, "delivery_location": "Door 1"},
+        "extras": {"keep_null": None},
+    }
+    out = _sanitize_invoice_extraction_ndjson_row(row)
+    assert "issue_date" not in out
+    assert out["delivery"] == {"delivery_location": "Door 1"}
+    assert "delivery_date" not in out["delivery"]
+    assert out["extras"] == {"keep_null": None}
 
 
 def test_invoice_extractions_schema_top_level_names() -> None:

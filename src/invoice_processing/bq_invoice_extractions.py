@@ -185,6 +185,34 @@ def _run_load_job(job: bigquery.LoadJob) -> None:
         raise
 
 
+def _drop_null_json_values(value: Any) -> Any:
+    """Remove None and the literal string ``'null'`` so NDJSON loads accept DATE fields.
+
+    BigQuery rejects JSON ``null`` for some DATE columns (e.g. nested ``delivery_date``);
+    omitting the key behaves as SQL NULL.
+    """
+    if isinstance(value, dict):
+        out: dict[str, Any] = {}
+        for k, v in value.items():
+            if v is None or v == "null":
+                continue
+            out[k] = _drop_null_json_values(v)
+        return out
+    if isinstance(value, list):
+        return [_drop_null_json_values(v) for v in value if v is not None]
+    return value
+
+
+def _sanitize_invoice_extraction_ndjson_row(row: dict[str, Any]) -> dict[str, Any]:
+    """Prepare a row dict for ``NEWLINE_DELIMITED_JSON`` load; keeps ``extras`` as-is."""
+    extras = row.get("extras")
+    base = {k: v for k, v in row.items() if k != "extras"}
+    cleaned = _drop_null_json_values(base)
+    if extras is not None:
+        cleaned["extras"] = extras
+    return cleaned
+
+
 def load_ndjson_rows(
     client: BigQueryClient,
     table_ref: str,
@@ -196,7 +224,8 @@ def load_ndjson_rows(
     """Load newline-delimited JSON rows via an in-memory load job."""
     buf = io.BytesIO()
     for row in rows:
-        buf.write(json.dumps(row, default=str).encode("utf-8"))
+        sanitized = _sanitize_invoice_extraction_ndjson_row(row)
+        buf.write(json.dumps(sanitized, default=str).encode("utf-8"))
         buf.write(b"\n")
     buf.seek(0)
     job_config = _invoice_extractions_load_job_config(write_disposition)
