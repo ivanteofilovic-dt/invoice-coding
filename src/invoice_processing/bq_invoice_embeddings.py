@@ -153,12 +153,12 @@ def invoice_embedding_inner_select_sql(
     ) AS embed_text,
     UPPER(REGEXP_REPLACE(TRIM(COALESCE(e.invoice_number, '')), r'\\s+', '')) AS invoice_number_norm,
     UPPER(REGEXP_REPLACE(TRIM(COALESCE(e.invoice_number, '')), r'\\s+', '')) AS invoice_key_norm,
-    TRIM(COALESCE(
+    UPPER(TRIM(COALESCE(
       e.supplier.company_legal_id,
       e.supplier.party_identification,
       e.supplier.endpoint_id,
       ''
-    )) AS supplier_ref_norm,
+    ))) AS supplier_ref_norm,
     e.extracted_at,
     e.invoice_number,
     e.currency_code
@@ -213,7 +213,7 @@ def build_invoice_gl_context_view_ddl(
 CREATE OR REPLACE VIEW {view} AS
 SELECT
   UPPER(REGEXP_REPLACE(TRIM(COALESCE(INVOICE_NUM, '')), r'\\s+', '')) AS invoice_key_norm,
-  TRIM(COALESCE(SUPPLIER_NUMBER, '')) AS supplier_number_norm,
+  UPPER(TRIM(COALESCE(SUPPLIER_NUMBER, ''))) AS supplier_number_norm,
   COUNT(*) AS gl_line_count,
   SUM(SAFE_CAST(NULLIF(TRIM(NET_ACCOUNTED), '') AS NUMERIC)) AS net_accounted_sum,
   ARRAY_AGG(
@@ -497,6 +497,48 @@ LIMIT {int(top_k)}
 """.strip()
 
 
+def _rag_neighbors_hits_join_gl_sql(
+    *,
+    hits_inner_sql: str,
+    embed_text_view_ref: str,
+    gl_context_view_ref: str,
+) -> str:
+    """Wrap VECTOR_SEARCH hits with embed keys + GL context (join on normalized invoice only).
+
+    ``v_invoice_gl_context`` has one row per (invoice, supplier); when GL has several suppliers
+    for the same invoice number we keep a single row for RAG (highest ``gl_line_count``, then
+    supplier id) so VECTOR_SEARCH hits stay one row per neighbor.
+    """
+    inner = hits_inner_sql.strip().rstrip(";")
+    return f"""
+WITH hits AS (
+  ({inner})
+),
+ev AS (
+  SELECT gcs_uri, invoice_key_norm
+  FROM {embed_text_view_ref}
+),
+gl_one_per_invoice AS (
+  SELECT *
+  FROM {gl_context_view_ref}
+  QUALIFY ROW_NUMBER() OVER (
+    PARTITION BY invoice_key_norm
+    ORDER BY gl_line_count DESC NULLS LAST, supplier_number_norm
+  ) = 1
+)
+SELECT
+  h.*,
+  g.gl_line_count,
+  g.net_accounted_sum,
+  g.gl_lines_recent
+FROM hits AS h
+LEFT JOIN ev ON ev.gcs_uri = h.gcs_uri
+LEFT JOIN gl_one_per_invoice AS g
+  ON g.invoice_key_norm = ev.invoice_key_norm
+ORDER BY h.distance
+""".strip()
+
+
 def build_rag_neighbors_with_gl_stored_embedding_sql(
     *,
     project_id: str,
@@ -517,27 +559,11 @@ def build_rag_neighbors_with_gl_stored_embedding_sql(
     )
     v = _qualified(project_id, dataset_id, embed_text_view_id)
     glv = _qualified(project_id, dataset_id, gl_context_view_id)
-    inner = base.strip().rstrip(";")
-    return f"""
-WITH hits AS (
-  ({inner})
-),
-ev AS (
-  SELECT gcs_uri, invoice_key_norm, supplier_ref_norm
-  FROM {v}
-)
-SELECT
-  h.*,
-  g.gl_line_count,
-  g.net_accounted_sum,
-  g.gl_lines_recent
-FROM hits AS h
-LEFT JOIN ev ON ev.gcs_uri = h.gcs_uri
-LEFT JOIN {glv} AS g
-  ON g.invoice_key_norm = ev.invoice_key_norm
- AND g.supplier_number_norm = ev.supplier_ref_norm
-ORDER BY h.distance
-""".strip()
+    return _rag_neighbors_hits_join_gl_sql(
+        hits_inner_sql=base,
+        embed_text_view_ref=v,
+        gl_context_view_ref=glv,
+    )
 
 
 def _embedding_load_job_config(write_disposition: str) -> bigquery.LoadJobConfig:
@@ -694,7 +720,7 @@ def build_rag_neighbors_with_gl_sql(
     top_k: int = 10,
     output_dimensionality: int = DEFAULT_OUTPUT_DIMENSIONALITY,
 ) -> str:
-    """VECTOR_SEARCH neighbors joined to GL context on invoice + supplier keys."""
+    """VECTOR_SEARCH neighbors joined to GL context on normalized invoice number."""
     base = build_vector_search_by_gcs_uri_sql(
         project_id=project_id,
         dataset_id=dataset_id,
@@ -707,27 +733,11 @@ def build_rag_neighbors_with_gl_sql(
     )
     v = _qualified(project_id, dataset_id, embed_text_view_id)
     glv = _qualified(project_id, dataset_id, gl_context_view_id)
-    inner = base.strip().rstrip(";")
-    return f"""
-WITH hits AS (
-  ({inner})
-),
-ev AS (
-  SELECT gcs_uri, invoice_key_norm, supplier_ref_norm
-  FROM {v}
-)
-SELECT
-  h.*,
-  g.gl_line_count,
-  g.net_accounted_sum,
-  g.gl_lines_recent
-FROM hits AS h
-LEFT JOIN ev ON ev.gcs_uri = h.gcs_uri
-LEFT JOIN {glv} AS g
-  ON g.invoice_key_norm = ev.invoice_key_norm
- AND g.supplier_number_norm = ev.supplier_ref_norm
-ORDER BY h.distance
-""".strip()
+    return _rag_neighbors_hits_join_gl_sql(
+        hits_inner_sql=base,
+        embed_text_view_ref=v,
+        gl_context_view_ref=glv,
+    )
 
 
 def run_ddl(

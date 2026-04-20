@@ -158,7 +158,9 @@ def test_build_rag_neighbors_wraps_hits_subquery() -> None:
         top_k=3,
     )
     assert "WITH hits AS" in sql
-    assert "LEFT JOIN `p.d.v_invoice_gl_context` AS g" in sql
+    assert "gl_one_per_invoice" in sql
+    assert "QUALIFY ROW_NUMBER()" in sql
+    assert "LEFT JOIN gl_one_per_invoice AS g" in sql
 
 
 def test_build_create_remote_model_ddl() -> None:

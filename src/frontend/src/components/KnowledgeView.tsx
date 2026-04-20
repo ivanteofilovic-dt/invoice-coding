@@ -31,7 +31,7 @@ export function KnowledgeView() {
           Historical invoice extractions and document-level embed text live in BigQuery; vectors are in{" "}
           <code className="rounded bg-slate-100 px-1">invoice_embeddings</code>. Similarity search uses{" "}
           <code className="rounded bg-slate-100 px-1">VECTOR_SEARCH</code> on those vectors, then GL context is joined via{" "}
-          <code className="rounded bg-slate-100 px-1">v_invoice_gl_context</code> (invoice + supplier keys).
+          <code className="rounded bg-slate-100 px-1">v_invoice_gl_context</code> (RAG joins on invoice key).
         </p>
         <div className="mt-6 space-y-3 text-left">
           <div className="flex justify-between rounded-lg border border-slate-100 bg-slate-50 p-3">
