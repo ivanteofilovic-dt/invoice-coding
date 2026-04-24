@@ -83,6 +83,11 @@ export interface TrainingSnippet {
   currency?: string;
   account?: string;
   cost_center?: string;
+  product_code?: string;
+  ic?: string;
+  project?: string;
+  gl_system?: string;
+  reserve?: string;
   posting_date?: string;
   [key: string]: unknown;
 }

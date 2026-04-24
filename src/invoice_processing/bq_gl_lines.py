@@ -79,6 +79,9 @@ def gl_row_passes_filters(row: dict[str, str | None]) -> bool:
     desc = _cell(row.get("GL_LINE_DESCRIPTION")).lower()
     if "ankreg" in desc:
         return False
+    account = _cell(row.get("ACCOUNT")).strip()
+    if account.startswith("24"):
+        return False
     return True
 
 

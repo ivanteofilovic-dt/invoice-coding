@@ -63,6 +63,10 @@ def _gl_line_to_training_snippet(gl: dict[str, Any]) -> dict[str, Any]:
         "account": gl.get("account"),
         "cost_center": gl.get("department"),
         "product_code": gl.get("product"),
+        "ic": gl.get("ic"),
+        "project": gl.get("project"),
+        "gl_system": gl.get("gl_system"),
+        "reserve": gl.get("reserve"),
         "line_description": gl.get("gl_line_description"),
         "line_amount": gl.get("net_accounted"),
         "currency": None,
@@ -139,14 +143,18 @@ def neighbors_for_llm_context(records: list[dict[str, Any]]) -> str:
                 if isinstance(gl, dict):
                     parts.append(
                         f"    gl[{i}]: account={gl.get('account')} dept={gl.get('cost_center')} "
-                        f"product={gl.get('product_code')} period={gl.get('period')} "
+                        f"product={gl.get('product_code')} ic={gl.get('ic')} "
+                        f"project={gl.get('project')} system={gl.get('gl_system')} "
+                        f"reserve={gl.get('reserve')} period={gl.get('period')} "
                         f"net={gl.get('line_amount')} memo={gl.get('line_description')}"
                     )
         elif rec.get("training") and isinstance(rec["training"], dict):
             t = rec["training"]
             parts.append(
                 f"    gl: account={t.get('account')} dept={t.get('cost_center')} "
-                f"period={t.get('period')} net={t.get('line_amount')}"
+                f"product={t.get('product_code')} ic={t.get('ic')} "
+                f"project={t.get('project')} system={t.get('gl_system')} "
+                f"reserve={t.get('reserve')} period={t.get('period')} net={t.get('line_amount')}"
             )
     return "\n".join(parts) if parts else "(no neighbors)"
 

@@ -73,6 +73,26 @@ def test_gl_row_passes_filters_drops_ankreg_case_insensitive() -> None:
     assert gl_row_passes_filters(row) is False
 
 
+def test_gl_row_passes_filters_drops_account_starting_with_24() -> None:
+    row = {
+        "SUPPLIER_NUMBER": "1",
+        "SUPPLIER_CUSTMER_NAME": "",
+        "ACCOUNT": "24001",
+        "GL_LINE_DESCRIPTION": "ok",
+    }
+    assert gl_row_passes_filters(row) is False
+
+
+def test_gl_row_passes_filters_keeps_account_not_in_24_range() -> None:
+    row = {
+        "SUPPLIER_NUMBER": "1",
+        "SUPPLIER_CUSTMER_NAME": "",
+        "ACCOUNT": "62301",
+        "GL_LINE_DESCRIPTION": "ok",
+    }
+    assert gl_row_passes_filters(row) is True
+
+
 def test_gl_row_passes_filters_ankreg_substring() -> None:
     row = {
         "SUPPLIER_NUMBER": "1",

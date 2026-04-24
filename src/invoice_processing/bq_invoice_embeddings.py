@@ -225,6 +225,10 @@ SELECT
       GL_LINE_DESCRIPTION AS gl_line_description,
       DEPARTMENT AS department,
       PRODUCT AS product,
+      IC AS ic,
+      PROJECT AS project,
+      SYSTEM AS gl_system,
+      RESERVE AS reserve,
       NET_ACCOUNTED AS net_accounted,
       TRANSACTION_TYPE_NAME AS transaction_type_name
     )

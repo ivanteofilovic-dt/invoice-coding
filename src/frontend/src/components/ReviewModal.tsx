@@ -73,21 +73,21 @@ export function ReviewModal({
 
   const [account, setAccount] = useState("");
   const [costCenter, setCostCenter] = useState("");
+  const [product, setProduct] = useState("");
+  const [ic, setIc] = useState("");
+  const [project, setProject] = useState("");
+  const [glSystem, setGlSystem] = useState("");
+  const [reserve, setReserve] = useState("");
 
   useEffect(() => {
-    if (!suggestion?.journal_lines?.length) {
-      setAccount("");
-      setCostCenter("");
-      return;
-    }
-    const line = primaryJournalLine(suggestion);
-    if (!line) {
-      setAccount("");
-      setCostCenter("");
-      return;
-    }
-    setAccount(line.account != null ? String(line.account) : "");
-    setCostCenter(line.cost_center != null ? String(line.cost_center) : "");
+    const line = suggestion?.journal_lines?.length ? primaryJournalLine(suggestion) : undefined;
+    setAccount(line?.account != null ? String(line.account) : "");
+    setCostCenter(line?.cost_center != null ? String(line.cost_center) : "");
+    setProduct(line?.product_code != null ? String(line.product_code) : "");
+    setIc(line?.ic != null ? String(line.ic) : "");
+    setProject(line?.project != null ? String(line.project) : "");
+    setGlSystem(line?.gl_system != null ? String(line.gl_system) : "");
+    setReserve(line?.reserve != null ? String(line.reserve) : "");
   }, [suggestion]);
 
   if (!state || !suggestion) return null;
@@ -167,6 +167,61 @@ export function ReviewModal({
               </div>
               <div className="space-y-1">
                 <label className="text-xs font-bold uppercase tracking-wider text-slate-400">
+                  Product
+                </label>
+                <input
+                  type="text"
+                  value={product}
+                  onChange={(e) => setProduct(e.target.value)}
+                  className="w-full rounded-lg border border-slate-200 p-3 font-medium outline-none focus:ring-2 focus:ring-indigo-500"
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs font-bold uppercase tracking-wider text-slate-400">
+                  IC
+                </label>
+                <input
+                  type="text"
+                  value={ic}
+                  onChange={(e) => setIc(e.target.value)}
+                  className="w-full rounded-lg border border-slate-200 p-3 font-medium outline-none focus:ring-2 focus:ring-indigo-500"
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs font-bold uppercase tracking-wider text-slate-400">
+                  Project
+                </label>
+                <input
+                  type="text"
+                  value={project}
+                  onChange={(e) => setProject(e.target.value)}
+                  className="w-full rounded-lg border border-slate-200 p-3 font-medium outline-none focus:ring-2 focus:ring-indigo-500"
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs font-bold uppercase tracking-wider text-slate-400">
+                  System
+                </label>
+                <input
+                  type="text"
+                  value={glSystem}
+                  onChange={(e) => setGlSystem(e.target.value)}
+                  className="w-full rounded-lg border border-slate-200 p-3 font-medium outline-none focus:ring-2 focus:ring-indigo-500"
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs font-bold uppercase tracking-wider text-slate-400">
+                  Reserve
+                </label>
+                <input
+                  type="text"
+                  value={reserve}
+                  onChange={(e) => setReserve(e.target.value)}
+                  className="w-full rounded-lg border border-slate-200 p-3 font-medium outline-none focus:ring-2 focus:ring-indigo-500"
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs font-bold uppercase tracking-wider text-slate-400">
                   Periodization
                 </label>
                 <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
@@ -175,7 +230,7 @@ export function ReviewModal({
                     : extraction?.periodization_hint || "—"}
                 </div>
               </div>
-              <div className="space-y-1">
+              <div className="col-span-2 space-y-1">
                 <label className="text-xs font-bold uppercase tracking-wider text-slate-400">
                   Model confidence
                 </label>
@@ -216,10 +271,12 @@ export function ReviewModal({
             {suggestion.journal_lines.length > 1 && (
               <div>
                 <h4 className="mb-2 text-sm font-semibold text-slate-800">All suggested journal lines</h4>
-                <ul className="list-inside list-disc text-sm text-slate-600">
+                <ul className="space-y-2 text-sm text-slate-600">
                   {suggestion.journal_lines.map((j, i) => (
-                    <li key={i}>
-                      {j.account ?? "—"} / {j.cost_center ?? "—"} · {j.memo || "no memo"}
+                    <li key={i} className="rounded-lg border border-slate-100 bg-slate-50 p-3 font-mono text-xs">
+                      <span className="font-semibold text-slate-800">#{i + 1}</span>
+                      {" "}acct={j.account ?? "—"} cc={j.cost_center ?? "—"} prod={j.product_code ?? "—"} ic={j.ic ?? "—"} proj={j.project ?? "—"} sys={j.gl_system ?? "—"} rsv={j.reserve ?? "—"}
+                      {j.memo && <span className="ml-2 text-slate-500">· {j.memo}</span>}
                     </li>
                   ))}
                 </ul>
@@ -266,8 +323,9 @@ export function ReviewModal({
                           {Array.isArray(m.gl_lines_preview) && m.gl_lines_preview.length > 1 && (
                             <ul className="mt-2 space-y-1 border-t border-slate-200 pt-2 text-[11px] text-slate-600">
                               {m.gl_lines_preview.slice(1, 4).map((gl, idx) => (
-                                <li key={idx}>
-                                  {gl.account ?? "—"} / {gl.cost_center ?? "—"} · {gl.line_description ?? ""}
+                                <li key={idx} className="font-mono">
+                                  {gl.account ?? "—"} / {gl.cost_center ?? "—"} / {gl.product_code ?? "—"} / ic={gl.ic ?? "—"} proj={gl.project ?? "—"} sys={gl.gl_system ?? "—"} rsv={gl.reserve ?? "—"}
+                                  {gl.line_description && <span className="ml-1 text-slate-400">· {gl.line_description}</span>}
                                 </li>
                               ))}
                             </ul>
@@ -277,8 +335,9 @@ export function ReviewModal({
                       {!t && Array.isArray(m.gl_lines_preview) && m.gl_lines_preview.length > 0 && (
                         <ul className="mt-1 space-y-1 text-[11px] text-slate-600">
                           {m.gl_lines_preview.slice(0, 3).map((gl, idx) => (
-                            <li key={idx}>
-                              {gl.account ?? "—"} / {gl.cost_center ?? "—"} · {gl.line_description ?? ""}
+                            <li key={idx} className="font-mono">
+                              {gl.account ?? "—"} / {gl.cost_center ?? "—"} / {gl.product_code ?? "—"} / ic={gl.ic ?? "—"} proj={gl.project ?? "—"} sys={gl.gl_system ?? "—"} rsv={gl.reserve ?? "—"}
+                              {gl.line_description && <span className="ml-1 text-slate-400">· {gl.line_description}</span>}
                             </li>
                           ))}
                         </ul>
