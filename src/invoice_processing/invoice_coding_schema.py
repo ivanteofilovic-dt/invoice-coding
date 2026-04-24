@@ -124,7 +124,7 @@ def suggest_coding(
     config = types.GenerateContentConfig(
         system_instruction=CODING_SYSTEM_INSTRUCTION,
         temperature=0.15,
-        max_output_tokens=4096,
+        max_output_tokens=8192,
         response_mime_type="application/json",
         response_json_schema=schema,
     )
@@ -133,6 +133,16 @@ def suggest_coding(
         contents=[types.Content(role="user", parts=[types.Part(text=user_text)])],
         config=config,
     )
+    # Detect token-limit truncation before trying to parse — truncated JSON always
+    # fails with an "Unterminated string" / unexpected-end error.
+    candidate = resp.candidates[0] if resp.candidates else None
+    finish_reason = str(getattr(candidate, "finish_reason", "")) if candidate else ""
+    if finish_reason and "MAX_TOKENS" in finish_reason.upper():
+        msg = (
+            f"Coding model response was truncated (finish_reason={finish_reason}). "
+            "Reduce prompt size or increase max_output_tokens."
+        )
+        raise RuntimeError(msg)
     text = (resp.text or "").strip()
     if not text:
         msg = "empty model response for coding"

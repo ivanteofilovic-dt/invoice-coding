@@ -115,6 +115,14 @@ def _extract_with_pdf_parts(
         contents=[types.Content(role="user", parts=parts)],
         config=config,
     )
+    candidate = resp.candidates[0] if resp.candidates else None
+    finish_reason = str(getattr(candidate, "finish_reason", "")) if candidate else ""
+    if finish_reason and "MAX_TOKENS" in finish_reason.upper():
+        msg = (
+            f"Extraction model response was truncated (finish_reason={finish_reason}). "
+            "The PDF may be too large; try splitting it or increasing max_output_tokens."
+        )
+        raise RuntimeError(msg)
     text = (resp.text or "").strip()
     if not text:
         msg = "empty model response for extraction"

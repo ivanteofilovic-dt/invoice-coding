@@ -147,13 +147,56 @@ def extraction_payload_to_bq_row(
 
 
 _CODE_FENCE = re.compile(r"^```(?:json)?\s*|\s*```$", re.IGNORECASE | re.MULTILINE)
+# Control characters that are never valid outside a JSON string (strip them unconditionally).
+_BARE_CTRL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f]")
+
+
+def _escape_ctrl_in_strings(text: str) -> str:
+    """Walk the JSON text and escape bare control characters inside string literals.
+
+    Handles the common case where an LLM emits a literal newline, carriage return,
+    or tab inside a string value instead of the required ``\\n`` / ``\\r`` / ``\\t``
+    escape sequence, which makes ``json.loads`` raise "Unterminated string".
+    """
+    out: list[str] = []
+    in_string = False
+    escaped = False
+    _escapes = {"\n": "\\n", "\r": "\\r", "\t": "\\t"}
+    for ch in text:
+        if escaped:
+            out.append(ch)
+            escaped = False
+        elif ch == "\\" and in_string:
+            out.append(ch)
+            escaped = True
+        elif ch == '"':
+            in_string = not in_string
+            out.append(ch)
+        elif in_string and ch in _escapes:
+            out.append(_escapes[ch])
+        elif in_string and "\x00" <= ch <= "\x1f":
+            pass  # drop remaining bare control chars inside strings
+        else:
+            out.append(ch)
+    return "".join(out)
 
 
 def parse_model_json_text(text: str) -> dict[str, Any]:
-    """Parse JSON from model output, stripping optional markdown fences."""
+    """Parse JSON from model output, stripping optional markdown fences.
+
+    Attempts a clean parse first; on failure tries to repair common LLM artefacts:
+    - bare newlines / tabs inside string literals
+    - stray non-printable control characters
+    """
     cleaned = text.strip()
     cleaned = _CODE_FENCE.sub("", cleaned).strip()
-    return json.loads(cleaned)
+    # Strip control chars that are never valid anywhere in JSON (outside strings).
+    cleaned = _BARE_CTRL.sub("", cleaned)
+    try:
+        return json.loads(cleaned)
+    except json.JSONDecodeError:
+        repaired = _escape_ctrl_in_strings(cleaned)
+        return json.loads(repaired)
 
 
 def gcs_uri_from_batch_request(request: dict[str, Any]) -> str | None:
