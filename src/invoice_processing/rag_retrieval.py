@@ -129,10 +129,19 @@ def bq_row_to_neighbor_record(
     }
 
 
-def neighbors_for_llm_context(records: list[dict[str, Any]]) -> str:
-    """Compact text block for the coding model."""
+def neighbors_for_llm_context(
+    records: list[dict[str, Any]],
+    *,
+    max_neighbors: int = 5,
+) -> str:
+    """Compact text block for the coding model.
+
+    Only the top ``max_neighbors`` (by rank) are included to keep the prompt
+    size predictable. Increasing RAG_TOP_K beyond this value still improves
+    retrieval recall without growing the coding prompt.
+    """
     parts: list[str] = []
-    for rec in records:
+    for rec in records[:max_neighbors]:
         parts.append(
             f"- rank={rec.get('rank')} gcs_uri={rec.get('document_id')} "
             f"cosine_distance={rec.get('cosine_distance')} similarity={rec.get('similarity')}"

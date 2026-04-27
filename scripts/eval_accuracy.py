@@ -258,6 +258,13 @@ def main() -> None:
         action="store_true",
         help="Skip persisting predictions into the rag_suggestions BQ table",
     )
+    parser.add_argument(
+        "--limit",
+        type=int,
+        default=None,
+        metavar="N",
+        help="Evaluate at most N PDFs (alphabetical order). Useful for quick smoke-tests.",
+    )
     args = parser.parse_args()
 
     eval_dir = Path(args.eval_dir)
@@ -273,7 +280,11 @@ def main() -> None:
         logger.error("No PDF files found in %s", eval_dir)
         sys.exit(1)
 
-    logger.info("Found %d PDF file(s) to evaluate", len(pdf_files))
+    if args.limit is not None:
+        pdf_files = pdf_files[: args.limit]
+        logger.info("Limiting evaluation to %d PDF file(s) (--limit)", len(pdf_files))
+    else:
+        logger.info("Found %d PDF file(s) to evaluate", len(pdf_files))
 
     # Load ground truth
     gt = load_gl_ground_truth(gl_dir)

@@ -124,7 +124,7 @@ def suggest_coding(
     config = types.GenerateContentConfig(
         system_instruction=CODING_SYSTEM_INSTRUCTION,
         temperature=0.15,
-        max_output_tokens=8192,
+        max_output_tokens=16384,
         response_mime_type="application/json",
         response_json_schema=schema,
     )
