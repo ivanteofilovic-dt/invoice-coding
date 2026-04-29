@@ -2,10 +2,27 @@
 
 from __future__ import annotations
 
+import logging
 import os
+import time
 import uuid
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from typing import Any
+
+logger = logging.getLogger(__name__)
+
+
+@contextmanager
+def _timed(label: str, timings: dict[str, float]):
+    t0 = time.perf_counter()
+    try:
+        yield
+    finally:
+        elapsed = time.perf_counter() - t0
+        timings[label] = round(elapsed, 3)
+        logger.info("  %-30s %.2fs", label, elapsed)
+
 
 from google import genai
 from google.cloud import storage
@@ -71,6 +88,10 @@ def run_analyze_pdf(
     storage_client: storage.Client | None = None,
 ) -> dict[str, Any]:
     """Run full pipeline; returns an ``AnalyzeResponse``-shaped dict."""
+    timings: dict[str, float] = {}
+    pipeline_start = time.perf_counter()
+    logger.info("Pipeline start: %s", filename)
+
     safe_name = filename.strip().replace("\\", "/").split("/")[-1] or "invoice.pdf"
     if not safe_name.lower().endswith(".pdf"):
         safe_name = f"{safe_name}.pdf"
@@ -78,31 +99,36 @@ def run_analyze_pdf(
     bucket = (gcs_bucket or "").strip()
     if bucket:
         object_name = f"{new_invoice_prefix.strip().strip('/')}/{run_part}_{safe_name}"
-        gcs_uri = upload_pdf_to_gcs(
-            bucket, object_name, pdf_bytes, client=storage_client
-        )
-        ext = extract_invoice_from_gcs_pdf(
-            genai_client, model_id=gemini_model, gcs_uri=gcs_uri
-        )
+        with _timed("gcs_upload", timings):
+            gcs_uri = upload_pdf_to_gcs(
+                bucket, object_name, pdf_bytes, client=storage_client
+            )
+        with _timed("gemini_extraction", timings):
+            ext = extract_invoice_from_gcs_pdf(
+                genai_client, model_id=gemini_model, gcs_uri=gcs_uri
+            )
         pdf_storage = "gcs"
     else:
         gcs_uri = make_inline_document_uri(run_id=run_part, filename=safe_name)
-        ext = extract_invoice_from_pdf_bytes(
-            genai_client,
-            model_id=gemini_model,
-            pdf_bytes=pdf_bytes,
-            document_uri=gcs_uri,
-            display_filename=safe_name,
-        )
+        with _timed("gemini_extraction", timings):
+            ext = extract_invoice_from_pdf_bytes(
+                genai_client,
+                model_id=gemini_model,
+                pdf_bytes=pdf_bytes,
+                document_uri=gcs_uri,
+                display_filename=safe_name,
+            )
         pdf_storage = "inline"
-    ext_table_ref = ensure_invoice_extractions_table(
-        bq_client,
-        bq_dataset,
-        bq_extractions_table,
-        project_id=project_id,
-        location=bq_location,
-    )
-    load_ndjson_rows(bq_client, ext_table_ref, [ext.bq_row], location=bq_location)
+
+    with _timed("bq_load_extraction", timings):
+        ext_table_ref = ensure_invoice_extractions_table(
+            bq_client,
+            bq_dataset,
+            bq_extractions_table,
+            project_id=project_id,
+            location=bq_location,
+        )
+        load_ndjson_rows(bq_client, ext_table_ref, [ext.bq_row], location=bq_location)
 
     rag_cfg = RagRetrievalConfig(
         project_id=project_id,
@@ -116,14 +142,18 @@ def run_analyze_pdf(
         bq_location=bq_location,
         top_k=rag_top_k,
     )
-    neighbors = fetch_rag_neighbors(bq_client, rag_cfg, gcs_uri)
+    with _timed("rag_retrieval", timings):
+        neighbors = fetch_rag_neighbors(bq_client, rag_cfg, gcs_uri)
     n_ctx = neighbors_for_llm_context(neighbors)
-    coding = suggest_coding(
-        genai_client,
-        model_id=gemini_model,
-        current_extraction=ext.payload,
-        neighbors_context=n_ctx,
-    )
+
+    with _timed("gemini_coding", timings):
+        coding = suggest_coding(
+            genai_client,
+            model_id=gemini_model,
+            current_extraction=ext.payload,
+            neighbors_context=n_ctx,
+        )
+
     model_conf = float(coding.get("confidence") or 0.0)
     status, final_conf = derive_status_and_final_confidence(model_conf, neighbors)
     confidence_meta: dict[str, Any] = {
@@ -138,35 +168,45 @@ def run_analyze_pdf(
     document_id = ext.ui_extraction.get("document_id") or safe_name
 
     if persist:
-        sug_ref = ensure_rag_suggestions_table(
-            bq_client,
-            bq_dataset,
-            rag_suggestions_table,
-            project_id=project_id,
-            location=bq_location,
-        )
-        insert_suggestion_row(
-            bq_client,
-            sug_ref,
-            {
-                "suggestion_id": suggestion_id,
-                "created_at": datetime.now(timezone.utc),
-                "gcs_uri": gcs_uri,
-                "document_id": document_id,
-                "status": status,
-                "final_confidence": final_conf,
-                "extraction": ext.ui_extraction,
-                "suggestion": coding,
-                "neighbors": neighbors,
-                "confidence_meta": confidence_meta,
-            },
-        )
+        with _timed("bq_persist_suggestion", timings):
+            sug_ref = ensure_rag_suggestions_table(
+                bq_client,
+                bq_dataset,
+                rag_suggestions_table,
+                project_id=project_id,
+                location=bq_location,
+            )
+            insert_suggestion_row(
+                bq_client,
+                sug_ref,
+                {
+                    "suggestion_id": suggestion_id,
+                    "created_at": datetime.now(timezone.utc),
+                    "gcs_uri": gcs_uri,
+                    "document_id": document_id,
+                    "status": status,
+                    "final_confidence": final_conf,
+                    "extraction": ext.ui_extraction,
+                    "suggestion": coding,
+                    "neighbors": neighbors,
+                    "confidence_meta": confidence_meta,
+                },
+            )
+
+    total = round(time.perf_counter() - pipeline_start, 3)
+    timings["total"] = total
+    logger.info(
+        "Pipeline done: %s  total=%.2fs  breakdown=%s",
+        filename,
+        total,
+        timings,
+    )
 
     return {
         "extraction": ext.ui_extraction,
         "suggestion": coding,
         "neighbors": neighbors,
-        "confidence_meta": confidence_meta,
+        "confidence_meta": {**confidence_meta, "timings_seconds": timings},
         "final_confidence": final_conf,
         "status": status,
         "suggestion_id": suggestion_id if persist else None,
