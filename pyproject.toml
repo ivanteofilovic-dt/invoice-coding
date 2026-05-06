@@ -1,0 +1,20 @@
+[project]
+name = "poc-ankrag"
+version = "0.1.0"
+description = "Automated invoice coding POC using BigQuery vector search and Gemini"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "google-cloud-bigquery",
+    "google-genai",
+]
+
+[project.scripts]
+poc-ankrag = "poc_ankrag.__main__:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
