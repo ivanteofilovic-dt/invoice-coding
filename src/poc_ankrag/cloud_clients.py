@@ -15,14 +15,18 @@ from poc_ankrag.pipeline import PredictionRecord
 
 
 class GeminiJSONClient:
-    """Gemini JSON client backed by the Google Gen AI SDK."""
+    """Gemini JSON client backed by Vertex AI and Google Cloud credentials."""
 
-    def __init__(self) -> None:
+    def __init__(self, config: PipelineConfig) -> None:
         try:
             from google import genai
         except ImportError as exc:
             raise RuntimeError("Install google-genai to use GeminiJSONClient") from exc
-        self._client = genai.Client()
+        self._client = genai.Client(
+            vertexai=True,
+            project=config.project_id,
+            location=config.region,
+        )
 
     def generate_json(self, prompt: str, *, model: str) -> dict:
         response = self._client.models.generate_content(

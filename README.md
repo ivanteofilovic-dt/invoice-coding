@@ -39,7 +39,7 @@ The Python package in `src/poc_ankrag/` provides:
 - protocol-based orchestration in `pipeline.py`
 - optional Google Cloud clients in `cloud_clients.py`
 
-The runtime expects Google Cloud credentials with BigQuery and Vertex AI access.
+The runtime expects Google Cloud Application Default Credentials or service account credentials with BigQuery and Vertex AI access. Gemini calls are made through Vertex AI, not an API key.
 
 ## Predict Coding From A PDF
 
@@ -53,3 +53,10 @@ python -m poc_ankrag predict-pdf path/to/invoice.pdf --pretty
 ```
 
 The command sends the PDF to Gemini for structured invoice extraction, retrieves historical GL evidence from BigQuery, predicts coding dimensions for each invoice line, writes prediction audit rows, and returns JSON. The `estimated_accuracy` field is the model confidence score returned by Gemini; measured accuracy requires comparing predictions against known approved coding.
+
+For local development, authenticate with:
+
+```bash
+gcloud auth application-default login
+gcloud config set project my-project
+```

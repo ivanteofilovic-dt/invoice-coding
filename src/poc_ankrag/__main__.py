@@ -66,7 +66,7 @@ def _predict_pdf(args: argparse.Namespace) -> None:
     config = PipelineConfig.from_env()
     result = run_invoice_pdf_coding(
         args.pdf_path.read_bytes(),
-        gemini=GeminiJSONClient(),
+        gemini=GeminiJSONClient(config),
         store=BigQueryCodingHistoryStore(config),
         config=config,
     )
