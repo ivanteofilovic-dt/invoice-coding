@@ -5,8 +5,11 @@ description = "Automated invoice coding POC using BigQuery vector search and Gem
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "fastapi",
     "google-cloud-bigquery",
     "google-genai",
+    "python-multipart",
+    "uvicorn[standard]",
 ]
 
 [project.scripts]

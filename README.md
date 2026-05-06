@@ -60,3 +60,35 @@ For local development, authenticate with:
 gcloud auth application-default login
 gcloud config set project my-project
 ```
+
+## Web Application
+
+The POC also includes a FastAPI backend and a React frontend based on the original `frontend.js`
+canvas prototype.
+
+Install Python dependencies and run the API:
+
+```bash
+pip install -e .
+PROJECT_ID=my-project \
+DATASET_ID=invoice_coding \
+REGION=europe-west1 \
+uvicorn poc_ankrag.api:app --reload
+```
+
+The API exposes:
+
+- `GET /api/health` for a lightweight health check
+- `POST /api/invoices/code` for PDF invoice upload and coding
+- `GET /api/demo-invoice` for the sample UI result without Google Cloud credentials
+
+In another terminal, install and run the frontend:
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+By default Vite proxies `/api` requests to `http://localhost:8000`. To point the frontend at a
+different backend URL, set `VITE_API_BASE_URL`.
