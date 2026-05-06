@@ -111,7 +111,11 @@ def build_prediction_prompt(
             "",
             "Use the historical examples and vendor statistics as evidence. Prefer consistent historical vendor usage when the invoice line is ambiguous. Do not invent dimensions that are not supported by the examples or vendor summary.",
             "",
-            f"The IC value is rule-resolved and must be copied exactly: {resolved_ic}",
+            (
+                f"The IC value is rule-resolved and must be copied exactly: {resolved_ic}"
+                if resolved_ic
+                else "The IC value is not deterministically resolved; use your best judgment based on the historical examples and vendor summary."
+            ),
             "",
             "Return only strict JSON with this schema. Confidence is an estimated accuracy score for this prediction, where 1.0 means very strong historical support and 0.0 means unsupported.",
             _json_dumps(PREDICTION_SCHEMA),

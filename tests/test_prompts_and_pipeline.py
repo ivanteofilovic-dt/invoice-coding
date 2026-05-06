@@ -65,6 +65,47 @@ class PromptsAndPipelineTests(unittest.TestCase):
                 resolved_ic="IC123",
             )
 
+    def test_parse_coding_prediction_allows_any_ic_when_not_resolved(self):
+        prediction = parse_coding_prediction(
+            {
+                "ACCOUNT": "61000",
+                "DEPARTMENT": "1S1234",
+                "PRODUCT": "1S00000",
+                "IC": "SOME_VENDOR_IC",
+                "PROJECT": "000000",
+                "SYSTEM": "000000",
+                "RESERVE": "1S0000000000",
+            },
+            resolved_ic="",
+        )
+        self.assertEqual(prediction.ic, "SOME_VENDOR_IC")
+
+    def test_prediction_prompt_omits_copy_instruction_when_ic_not_resolved(self):
+        invoice = ExtractedInvoice(
+            vendor="Unknown Vendor",
+            invoice_number="INV-2",
+            invoice_date=date(2026, 5, 6),
+            currency="SEK",
+            lines=[
+                InvoiceLine(
+                    line_id="line-001",
+                    description="Misc service",
+                    amount=Decimal("500.00"),
+                )
+            ],
+        )
+
+        prompt = build_prediction_prompt(
+            invoice,
+            invoice.lines[0],
+            historical_examples=[],
+            vendor_summary=[],
+            resolved_ic="",
+        )
+
+        self.assertNotIn("must be copied exactly", prompt)
+        self.assertIn("not deterministically resolved", prompt)
+
     def test_code_extracted_invoice_reuses_vendor_context_and_batches_io(self):
         invoice = ExtractedInvoice(
             vendor="Telia Sverige AB",

@@ -109,7 +109,7 @@ def parse_coding_prediction(payload: dict, *, resolved_ic: str) -> CodingPredict
     if missing:
         raise ValueError(f"Gemini prediction missing dimensions: {', '.join(missing)}")
 
-    if str(payload["IC"]) != resolved_ic:
+    if resolved_ic and str(payload["IC"]) != resolved_ic:
         raise ValueError("Gemini prediction did not copy the rule-resolved IC value")
 
     return CodingPrediction(
