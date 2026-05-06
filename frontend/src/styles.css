@@ -506,6 +506,10 @@ button {
   text-align: left;
 }
 
+.line-card__summary > div:first-child {
+  min-width: 0;
+}
+
 .line-card__title {
   display: flex;
   align-items: center;
@@ -519,6 +523,11 @@ button {
   background: #f1f5f9;
   font-size: 0.8rem;
   font-weight: 900;
+}
+
+.line-card__title strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .line-card__meta {
@@ -577,7 +586,7 @@ button {
 
 .line-card__details {
   display: grid;
-  grid-template-columns: minmax(0, 1.4fr) minmax(18rem, 0.9fr);
+  grid-template-columns: minmax(0, 1fr);
   gap: 1.2rem;
   padding: 1.2rem;
   border-top: 1px solid #e2e8f0;
@@ -601,13 +610,14 @@ button {
 
 .coding-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(7.75rem, 1fr));
   gap: 0.7rem;
 }
 
 .coding-field {
   display: grid;
   gap: 0.25rem;
+  min-width: 0;
   padding: 0.8rem;
   border: 1px solid #e2e8f0;
   border-radius: 0.9rem;
@@ -627,8 +637,10 @@ button {
 }
 
 .coding-field strong {
+  min-width: 0;
   font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
-  font-size: 0.9rem;
+  font-size: 0.86rem;
+  overflow-wrap: anywhere;
 }
 
 .reasoning-card,
@@ -655,6 +667,7 @@ button {
   width: 100%;
   border-collapse: collapse;
   font-size: 0.85rem;
+  table-layout: fixed;
 }
 
 .history-panel th,
@@ -664,11 +677,26 @@ button {
   text-align: left;
 }
 
+.history-panel th:first-child,
 .history-panel td:first-child {
-  max-width: 10rem;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  width: 52%;
+}
+
+.history-panel th:nth-child(2),
+.history-panel td:nth-child(2),
+.history-panel th:nth-child(3),
+.history-panel td:nth-child(3) {
+  width: 16%;
+}
+
+.history-panel th:last-child,
+.history-panel td:last-child {
+  width: 16%;
+  text-align: right;
+}
+
+.history-panel td {
+  overflow-wrap: anywhere;
 }
 
 .empty-history {
