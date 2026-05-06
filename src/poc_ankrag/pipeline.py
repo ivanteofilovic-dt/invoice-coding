@@ -15,6 +15,15 @@ from poc_ankrag.prompts import build_extraction_prompt, build_pdf_extraction_pro
 REQUIRED_DIMENSIONS = ("ACCOUNT", "DEPARTMENT", "PRODUCT", "IC", "PROJECT", "SYSTEM", "RESERVE")
 
 
+@dataclass(frozen=True)
+class SimilarLineSearch:
+    line_id: str
+    vendor: str
+    line_description: str
+    embedding_content: str
+    vendor_only: bool
+
+
 class GeminiClient(Protocol):
     """Minimal Gemini interface used by the pipeline."""
 
@@ -51,6 +60,14 @@ class CodingHistoryStore(Protocol):
     ) -> list[HistoricalExample]:
         """Run embedding generation plus BigQuery VECTOR_SEARCH."""
 
+    def search_similar_lines_batch(
+        self,
+        searches: list[SimilarLineSearch],
+        *,
+        top_k: int = 20,
+    ) -> dict[str, list[HistoricalExample]]:
+        """Run embedding generation plus BigQuery VECTOR_SEARCH for multiple lines."""
+
     def fetch_vendor_summary(self, vendor: str, *, limit: int = 50) -> list[VendorCodingSummary]:
         """Fetch vendor-level ACCOUNT and DEPARTMENT statistics."""
 
@@ -62,6 +79,9 @@ class CodingHistoryStore(Protocol):
 
     def save_prediction(self, prediction: "PredictionRecord") -> None:
         """Persist prediction evidence and output for auditability."""
+
+    def save_predictions(self, predictions: list["PredictionRecord"]) -> None:
+        """Persist multiple prediction records for auditability."""
 
 
 @dataclass(frozen=True)
@@ -175,26 +195,38 @@ def code_extracted_invoice(
 ) -> list[CodingPrediction]:
     """Retrieve evidence, resolve IC, and predict coding dimensions for an invoice."""
 
-    predictions: list[CodingPrediction] = []
+    if not invoice.lines:
+        return []
+
+    vendor_summary = store.fetch_vendor_summary(invoice.vendor, limit=50)
+    ic_resolution = resolve_ic(
+        invoice.vendor,
+        store.fetch_vendor_ic_mappings(invoice.vendor),
+        store.fetch_historical_ic_usage(invoice.vendor),
+    )
+
+    searches: list[SimilarLineSearch] = []
     for line in invoice.lines:
         vendor_only = is_generic_line_description(line.description)
-        content = build_embedding_content(invoice.vendor, line.description, vendor_only=vendor_only)
-
-        examples = store.search_similar_lines(
-            line_id=line.line_id,
-            vendor=invoice.vendor,
-            line_description=line.description,
-            embedding_content=content,
-            vendor_only=vendor_only,
-            top_k=20,
+        searches.append(
+            SimilarLineSearch(
+                line_id=line.line_id,
+                vendor=invoice.vendor,
+                line_description=line.description,
+                embedding_content=build_embedding_content(
+                    invoice.vendor,
+                    line.description,
+                    vendor_only=vendor_only,
+                ),
+                vendor_only=vendor_only,
+            )
         )
-        vendor_summary = store.fetch_vendor_summary(invoice.vendor, limit=50)
+    examples_by_line_id = _search_similar_lines_batch(store, searches, top_k=20)
 
-        ic_resolution = resolve_ic(
-            invoice.vendor,
-            store.fetch_vendor_ic_mappings(invoice.vendor),
-            store.fetch_historical_ic_usage(invoice.vendor),
-        )
+    predictions: list[CodingPrediction] = []
+    prediction_records: list[PredictionRecord] = []
+    for line in invoice.lines:
+        examples = examples_by_line_id.get(line.line_id, [])
 
         prediction_prompt = build_prediction_prompt(
             invoice,
@@ -209,7 +241,7 @@ def code_extracted_invoice(
         )
         prediction = parse_coding_prediction(prediction_payload, resolved_ic=ic_resolution.ic)
 
-        store.save_prediction(
+        prediction_records.append(
             PredictionRecord(
                 invoice=invoice,
                 line_id=line.line_id,
@@ -222,7 +254,43 @@ def code_extracted_invoice(
         )
         predictions.append(prediction)
 
+    _save_predictions(store, prediction_records)
     return predictions
+
+
+def _search_similar_lines_batch(
+    store: CodingHistoryStore,
+    searches: list[SimilarLineSearch],
+    *,
+    top_k: int,
+) -> dict[str, list[HistoricalExample]]:
+    if not searches:
+        return {}
+    search_batch = getattr(store, "search_similar_lines_batch", None)
+    if callable(search_batch):
+        return search_batch(searches, top_k=top_k)
+    return {
+        search.line_id: store.search_similar_lines(
+            line_id=search.line_id,
+            vendor=search.vendor,
+            line_description=search.line_description,
+            embedding_content=search.embedding_content,
+            vendor_only=search.vendor_only,
+            top_k=top_k,
+        )
+        for search in searches
+    }
+
+
+def _save_predictions(store: CodingHistoryStore, prediction_records: list[PredictionRecord]) -> None:
+    if not prediction_records:
+        return
+    save_batch = getattr(store, "save_predictions", None)
+    if callable(save_batch):
+        save_batch(prediction_records)
+        return
+    for prediction_record in prediction_records:
+        store.save_prediction(prediction_record)
 
 
 def _invoice_from_payload(payload: dict) -> ExtractedInvoice:

@@ -11,7 +11,7 @@ from uuid import uuid4
 from poc_ankrag.config import PipelineConfig
 from poc_ankrag.ic_resolver import HistoricalICUsage, VendorICMapping
 from poc_ankrag.models import HistoricalExample, VendorCodingSummary
-from poc_ankrag.pipeline import PredictionRecord
+from poc_ankrag.pipeline import PredictionRecord, SimilarLineSearch
 
 
 class GeminiJSONClient:
@@ -144,6 +144,89 @@ class BigQueryCodingHistoryStore:
         )
         return [self._historical_example_from_row(row) for row in self._client.query(query, job_config=job_config)]
 
+    def search_similar_lines_batch(
+        self,
+        searches: list[SimilarLineSearch],
+        *,
+        top_k: int = 20,
+    ) -> dict[str, list[HistoricalExample]]:
+        if not searches:
+            return {}
+
+        input_rows_sql = "\nUNION ALL\n".join(
+            f"""
+          SELECT
+            @line_id_{index} AS line_id,
+            @vendor_{index} AS vendor,
+            @line_description_{index} AS line_description,
+            @vendor_only_{index} AS use_vendor_only_matching,
+            @embedding_content_{index} AS content
+            """
+            for index, _ in enumerate(searches)
+        )
+        query = f"""
+        WITH invoice_line_query AS (
+          {input_rows_sql}
+        ),
+        invoice_line_embedding AS (
+          SELECT
+            line_id,
+            vendor,
+            line_description,
+            use_vendor_only_matching,
+            ml_generate_embedding_result AS embedding
+          FROM ML.GENERATE_EMBEDDING(
+            MODEL `{self._config.project_id}.{self._config.dataset_id}.gl_embedding_model`,
+            (SELECT * FROM invoice_line_query),
+            STRUCT(TRUE AS flatten_json_output)
+          )
+        )
+        SELECT
+          query.line_id,
+          base.row_id AS historical_row_id,
+          base.SUPPLIER_CUSTMER_NAME,
+          base.GL_LINE_DESCRIPTION,
+          base.HFM_DSCRIPTIONS,
+          base.ACCOUNT,
+          base.DEPARTMENT,
+          base.PRODUCT,
+          base.IC,
+          base.PROJECT,
+          base.SYSTEM,
+          base.RESERVE,
+          base.AMOUNT,
+          base.POSTING_DATE,
+          distance
+        FROM VECTOR_SEARCH(
+          TABLE `{self._config.project_id}.{self._config.dataset_id}.gl_coding_history`,
+          'embedding',
+          (SELECT * FROM invoice_line_embedding),
+          'embedding',
+          top_k => @top_k,
+          distance_type => 'COSINE'
+        )
+        WHERE
+          NOT query.use_vendor_only_matching
+          OR UPPER(base.SUPPLIER_CUSTMER_NAME) = UPPER(query.vendor)
+        ORDER BY query.line_id, distance ASC
+        """
+        params: dict[str, Any] = {"top_k": top_k}
+        for index, search in enumerate(searches):
+            params.update(
+                {
+                    f"line_id_{index}": search.line_id,
+                    f"vendor_{index}": search.vendor,
+                    f"line_description_{index}": search.line_description,
+                    f"vendor_only_{index}": search.vendor_only,
+                    f"embedding_content_{index}": search.embedding_content,
+                }
+            )
+
+        results = {search.line_id: [] for search in searches}
+        for row in self._client.query(query, job_config=self._job_config(**params)):
+            results.setdefault(row.line_id, []).append(self._historical_example_from_row(row))
+        return results
+
     def fetch_vendor_summary(self, vendor: str, *, limit: int = 50) -> list[VendorCodingSummary]:
         query = f"""
         SELECT
@@ -204,9 +287,22 @@ class BigQueryCodingHistoryStore:
         ]
 
     def save_prediction(self, prediction: PredictionRecord) -> None:
+        self.save_predictions([prediction])
+
+    def save_predictions(self, predictions: list[PredictionRecord]) -> None:
+        if not predictions:
+            return
+
         table_id = f"{self._config.project_id}.{self._config.dataset_id}.invoice_coding_predictions"
+        rows = [self._prediction_row(prediction) for prediction in predictions]
+        errors = self._client.insert_rows_json(table_id, rows)
+        if errors:
+            raise RuntimeError(f"Failed to insert prediction audit rows: {errors}")
+
+    @staticmethod
+    def _prediction_row(prediction: PredictionRecord) -> dict[str, Any]:
         line = next(item for item in prediction.invoice.lines if item.line_id == prediction.line_id)
-        row = {
+        return {
             "prediction_id": str(uuid4()),
             "invoice_number": prediction.invoice.invoice_number,
             "vendor": prediction.invoice.vendor,
@@ -231,9 +327,6 @@ class BigQueryCodingHistoryStore:
             "vector_example_row_ids": prediction.vector_example_row_ids,
             "created_at": datetime.now(timezone.utc).isoformat(),
         }
-        errors = self._client.insert_rows_json(table_id, [row])
-        if errors:
-            raise RuntimeError(f"Failed to insert prediction audit row: {errors}")
 
     def _job_config(self, **params: Any) -> Any:
         query_parameters = []

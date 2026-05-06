@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import logging
 import os
 from datetime import date
 from decimal import Decimal
@@ -19,6 +21,9 @@ from poc_ankrag.models import CodingPrediction, ExtractedInvoice, InvoiceLine
 from poc_ankrag.pipeline import InvoiceCodingResult, run_invoice_pdf_coding
 
 MAX_UPLOAD_BYTES = 10 * 1024 * 1024
+DEFAULT_BATCH_CONCURRENCY = 4
+
+logger = logging.getLogger(__name__)
 
 
 class HistoricalLineResponse(BaseModel):
@@ -59,6 +64,21 @@ class HealthResponse(BaseModel):
     status: str
 
 
+class BatchInvoiceErrorResponse(BaseModel):
+    file_name: str | None = Field(default=None, alias="fileName")
+    error: str
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class BatchInvoiceCodingResponse(BaseModel):
+    total: int
+    succeeded: int
+    failed: int
+    invoices: list[InvoiceCodingResponse] = Field(default_factory=list)
+    errors: list[BatchInvoiceErrorResponse] = Field(default_factory=list)
+
+
 app = FastAPI(
     title="Automated Invoice Coding API",
     description="HTTP API for Gemini extraction, BigQuery evidence retrieval, and GL prediction.",
@@ -81,20 +101,7 @@ def health() -> HealthResponse:
 
 @app.post("/api/invoices/code", response_model=InvoiceCodingResponse)
 async def code_invoice(file: UploadFile = File(...)) -> InvoiceCodingResponse:
-    if not _is_pdf_upload(file):
-        raise HTTPException(
-            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
-            detail="Only PDF invoices are supported by the current Gemini extraction pipeline.",
-        )
-
-    pdf_bytes = await file.read()
-    if not pdf_bytes:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Uploaded file is empty.")
-    if len(pdf_bytes) > MAX_UPLOAD_BYTES:
-        raise HTTPException(
-            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-            detail="Invoice PDF must be 10 MB or smaller.",
-        )
+    pdf_bytes = await _read_pdf_upload(file)
 
     try:
         result = await run_in_threadpool(_run_pdf_coding, pdf_bytes)
@@ -113,14 +120,78 @@ async def code_invoice(file: UploadFile = File(...)) -> InvoiceCodingResponse:
     return _to_response(result.invoice, result.predictions, source_file_name=file.filename)
 
 
+@app.post("/api/invoices/batch/code", response_model=BatchInvoiceCodingResponse)
+async def code_invoice_batch(files: list[UploadFile] = File(...)) -> BatchInvoiceCodingResponse:
+    concurrency = _batch_concurrency()
+    semaphore = asyncio.Semaphore(concurrency)
+
+    async def process_file(file: UploadFile) -> tuple[InvoiceCodingResponse | None, BatchInvoiceErrorResponse | None]:
+        async with semaphore:
+            try:
+                pdf_bytes = await _read_pdf_upload(file)
+                result = await run_in_threadpool(_run_pdf_coding, pdf_bytes)
+                return _to_response(result.invoice, result.predictions, source_file_name=file.filename), None
+            except HTTPException as exc:
+                detail = str(exc.detail)
+                logger.warning("Skipping invoice upload %s: %s", file.filename, detail)
+            except KeyError as exc:
+                detail = f"Backend is missing required environment variable: {exc.args[0]}"
+                logger.exception("Failed to process invoice upload %s", file.filename)
+            except Exception as exc:
+                detail = f"Invoice coding failed: {exc}"
+                logger.exception("Failed to process invoice upload %s", file.filename)
+
+            return None, BatchInvoiceErrorResponse(fileName=file.filename, error=detail)
+
+    processed = await asyncio.gather(*(process_file(file) for file in files))
+    invoices = [invoice for invoice, _ in processed if invoice is not None]
+    errors = [error for _, error in processed if error is not None]
+    return BatchInvoiceCodingResponse(
+        total=len(files),
+        succeeded=len(invoices),
+        failed=len(errors),
+        invoices=invoices,
+        errors=errors,
+    )
+
+
 @app.get("/api/demo-invoice", response_model=InvoiceCodingResponse)
 def demo_invoice() -> InvoiceCodingResponse:
     return _demo_response()
 
 
+async def _read_pdf_upload(file: UploadFile) -> bytes:
+    if not _is_pdf_upload(file):
+        raise HTTPException(
+            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+            detail="Only PDF invoices are supported by the current Gemini extraction pipeline.",
+        )
+
+    pdf_bytes = await file.read()
+    if not pdf_bytes:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Uploaded file is empty.")
+    if len(pdf_bytes) > MAX_UPLOAD_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail="Invoice PDF must be 10 MB or smaller.",
+        )
+    return pdf_bytes
+
+
 def _is_pdf_upload(file: UploadFile) -> bool:
     filename = (file.filename or "").lower()
     return file.content_type == "application/pdf" or filename.endswith(".pdf")
+
+
+def _batch_concurrency() -> int:
+    raw_value = os.environ.get("BATCH_CONCURRENCY")
+    if not raw_value:
+        return DEFAULT_BATCH_CONCURRENCY
+    try:
+        return max(1, int(raw_value))
+    except ValueError:
+        logger.warning("Invalid BATCH_CONCURRENCY=%r; using default %s", raw_value, DEFAULT_BATCH_CONCURRENCY)
+        return DEFAULT_BATCH_CONCURRENCY
 
 
 @lru_cache(maxsize=1)
