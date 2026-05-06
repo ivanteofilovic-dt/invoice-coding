@@ -23,24 +23,26 @@ export function ResultsView({ results, files, errors, onReset }: ResultsViewProp
       <MockPdfViewer fileName={file?.name ?? result.sourceFileName ?? "invoice.pdf"} data={result} />
 
       <div className="results-panel">
-        <div className="results-header">
-          <h2>
-            <FileCheck size={28} />
-            {isBatch ? "Batch complete" : "Coding complete"}
-          </h2>
-          <button className="button button--secondary" type="button" onClick={onReset}>
-            Upload more
-          </button>
-        </div>
+        <div className="results-sticky-top">
+          <div className="results-header">
+            <h2>
+              <FileCheck size={28} />
+              {isBatch ? "Batch complete" : "Coding complete"}
+            </h2>
+            <button className="button button--secondary" type="button" onClick={onReset}>
+              Upload more
+            </button>
+          </div>
 
-        {isBatch && (
-          <BatchSummary
-            results={results}
-            errors={errors}
-            selectedIndex={selectedIndex}
-            onSelect={setSelectedIndex}
-          />
-        )}
+          {isBatch && (
+            <BatchSummary
+              results={results}
+              errors={errors}
+              selectedIndex={selectedIndex}
+              onSelect={setSelectedIndex}
+            />
+          )}
+        </div>
 
         <div className="summary-card">
           <SummaryField label="Vendor" value={result.vendor} strong />
