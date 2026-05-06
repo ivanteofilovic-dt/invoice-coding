@@ -10,6 +10,15 @@ type LineItemCardProps = {
 };
 
 const codingLabels = ["ACCOUNT", "DEPARTMENT", "PRODUCT", "IC", "PROJECT", "SYSTEM", "RESERVE"] as const;
+const historyDimensions = [
+  ["Account", "account"],
+  ["Dept", "dept"],
+  ["Product", "product"],
+  ["IC", "ic"],
+  ["Project", "project"],
+  ["System", "system"],
+  ["Reserve", "reserve"]
+] as const;
 
 export function LineItemCard({ line, index, currency }: LineItemCardProps) {
   const [expanded, setExpanded] = useState(index === 0);
@@ -68,26 +77,37 @@ export function LineItemCard({ line, index, currency }: LineItemCardProps) {
               BigQuery similar historical lines
             </h4>
             {line.historicalLines.length > 0 ? (
-              <table>
-                <thead>
-                  <tr>
-                    <th>Description</th>
-                    <th>Account</th>
-                    <th>Dept</th>
-                    <th>Match</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {line.historicalLines.map((history, historyIndex) => (
-                    <tr key={`${history.date ?? "no-date"}-${history.desc}-${history.account}-${history.dept}-${historyIndex}`}>
-                      <td title={history.desc}>{history.desc}</td>
-                      <td>{history.account}</td>
-                      <td>{history.dept}</td>
-                      <td>{history.similarity ?? "N/A"}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+              <div className="history-list">
+                {line.historicalLines.map((history, historyIndex) => (
+                  <article
+                    className="history-item"
+                    key={`${history.date ?? "no-date"}-${history.desc}-${history.account}-${history.dept}-${historyIndex}`}
+                  >
+                    <div className="history-item__header">
+                      <div>
+                        <strong title={history.desc}>{history.desc}</strong>
+                        <span>{history.supplierName ?? "Unknown supplier"}</span>
+                      </div>
+                      <span className="history-item__match">{history.similarity ?? "N/A"}</span>
+                    </div>
+
+                    <div className="history-item__meta">
+                      <span>{history.date ?? "No posting date"}</span>
+                      <span>{formatMoney(history.amount, currency)}</span>
+                      {history.hfmDescription && <span>{history.hfmDescription}</span>}
+                    </div>
+
+                    <dl className="history-dimensions">
+                      {historyDimensions.map(([label, key]) => (
+                        <div key={key}>
+                          <dt>{label}</dt>
+                          <dd>{history[key] || "N/A"}</dd>
+                        </div>
+                      ))}
+                    </dl>
+                  </article>
+                ))}
+              </div>
             ) : (
               <p className="empty-history">
                 <AlertCircle size={16} />

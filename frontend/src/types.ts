@@ -10,9 +10,17 @@ export type CodingDimensions = {
 
 export type HistoricalLine = {
   date: string | null;
+  supplierName: string | null;
   desc: string;
+  hfmDescription: string | null;
   account: string;
   dept: string;
+  product: string | null;
+  ic: string | null;
+  project: string | null;
+  system: string | null;
+  reserve: string | null;
+  amount: number | null;
   similarity: string | null;
 };
 
@@ -36,6 +44,12 @@ export type InvoiceCodingResult = {
   currency: string;
   sourceFileName: string | null;
   lineItems: InvoiceLineItem[];
+};
+
+export type CodingHistoryEntry = {
+  id: string;
+  codedAt: string;
+  result: InvoiceCodingResult;
 };
 
 export type BatchInvoiceError = {

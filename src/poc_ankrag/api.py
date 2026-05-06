@@ -28,10 +28,20 @@ logger = logging.getLogger(__name__)
 
 class HistoricalLineResponse(BaseModel):
     date: str | None = None
+    supplier_name: str | None = Field(default=None, alias="supplierName")
     desc: str
+    hfm_description: str | None = Field(default=None, alias="hfmDescription")
     account: str
     dept: str
+    product: str | None = None
+    ic: str | None = None
+    project: str | None = None
+    system: str | None = None
+    reserve: str | None = None
+    amount: float | None = None
     similarity: str | None = None
+
+    model_config = ConfigDict(populate_by_name=True)
 
 
 class InvoiceLineResponse(BaseModel):
@@ -269,9 +279,17 @@ def _historical_line_to_response(example: HistoricalExample) -> HistoricalLineRe
     similarity = max(0.0, min(1.0, 1.0 - example.distance))
     return HistoricalLineResponse(
         date=example.posting_date.isoformat() if example.posting_date else None,
+        supplierName=example.supplier_customer_name,
         desc=example.gl_line_description,
+        hfmDescription=example.hfm_descriptions,
         account=example.account,
         dept=example.department,
+        product=example.product,
+        ic=example.ic,
+        project=example.project,
+        system=example.system,
+        reserve=example.reserve,
+        amount=_decimal_to_float(example.amount),
         similarity=f"{round(similarity * 100)}%",
     )
 
@@ -316,16 +334,32 @@ def _demo_response() -> InvoiceCodingResponse:
                 "historicalLines": [
                     {
                         "date": "2026-02-10",
+                        "supplierName": "Exclusive Networks Sweden AB",
                         "desc": "FC-10-S12FP-247-02-12 Firewall",
+                        "hfmDescription": "Network hardware and firewall appliances",
                         "account": "40190",
                         "dept": "F82250",
+                        "product": "F800000",
+                        "ic": "00",
+                        "project": "000000",
+                        "system": "000000",
+                        "reserve": "F80000000000",
+                        "amount": 2563.36,
                         "similarity": "99%",
                     },
                     {
                         "date": "2026-01-22",
+                        "supplierName": "Exclusive Networks Sweden AB",
                         "desc": "FC-10-F108F-247-02-12 Firewall app.",
+                        "hfmDescription": "Network hardware and firewall appliances",
                         "account": "40190",
                         "dept": "F82250",
+                        "product": "F800000",
+                        "ic": "00",
+                        "project": "000000",
+                        "system": "000000",
+                        "reserve": "F80000000000",
+                        "amount": 1980.0,
                         "similarity": "92%",
                     },
                 ],
@@ -353,9 +387,17 @@ def _demo_response() -> InvoiceCodingResponse:
                 "historicalLines": [
                     {
                         "date": "2026-01-22",
+                        "supplierName": "Exclusive Networks Sweden AB",
                         "desc": "Consulting - setup",
+                        "hfmDescription": "Consultancy IS/IT",
                         "account": "60110",
                         "dept": "F82250",
+                        "product": "F800000",
+                        "ic": "00",
+                        "project": "000000",
+                        "system": "000000",
+                        "reserve": "F80000000000",
+                        "amount": 850.0,
                         "similarity": "88%",
                     }
                 ],
