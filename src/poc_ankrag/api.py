@@ -280,9 +280,9 @@ def _historical_line_to_response(example: HistoricalExample) -> HistoricalLineRe
     return HistoricalLineResponse(
         date=example.posting_date.isoformat() if example.posting_date else None,
         supplierName=example.supplier_customer_name,
-        desc=example.gl_line_description,
+        desc=example.gl_line_description or "",
         hfmDescription=example.hfm_descriptions,
-        account=example.account,
+        account=example.account or "",
         dept=example.department,
         product=example.product,
         ic=example.ic,

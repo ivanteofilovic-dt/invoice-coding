@@ -56,16 +56,16 @@ class HistoricalExample:
     """A similar historical GL line returned by BigQuery VECTOR_SEARCH."""
 
     historical_row_id: str
-    supplier_customer_name: str
-    gl_line_description: str
-    hfm_descriptions: str
-    account: str
-    department: str
-    product: str
-    ic: str
-    project: str
-    system: str
-    reserve: str
+    supplier_customer_name: str | None
+    gl_line_description: str | None
+    hfm_descriptions: str | None
+    account: str | None
+    department: str | None
+    product: str | None
+    ic: str | None
+    project: str | None
+    system: str | None
+    reserve: str | None
     amount: Decimal | None
     posting_date: date | None
     distance: float
