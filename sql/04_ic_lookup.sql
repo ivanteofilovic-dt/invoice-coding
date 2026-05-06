@@ -71,5 +71,6 @@ SELECT
   '' AS ic,
   'default_non_ic' AS resolution_source,
   0.0 AS confidence
+FROM (SELECT 1)
 WHERE NOT EXISTS (SELECT 1 FROM mapping_match)
   AND NOT EXISTS (SELECT 1 FROM historical_match);
