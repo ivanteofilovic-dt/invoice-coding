@@ -508,7 +508,8 @@ button {
 .history-entry-list {
   display: grid;
   gap: 0.55rem;
-  overflow: auto;
+  overflow-y: auto;
+  min-height: 0;
   padding-right: 0.2rem;
 }
 
