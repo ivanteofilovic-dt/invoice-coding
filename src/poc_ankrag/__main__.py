@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 from pathlib import Path
 
 from poc_ankrag.config import PipelineConfig
@@ -20,6 +21,11 @@ def main() -> None:
     render.add_argument("--script", choices=SQL_SCRIPTS, help="Render only one script")
     render.add_argument("--output-dir", type=Path, help="Write rendered SQL files to this directory")
     render.set_defaults(func=_render_sql)
+
+    predict_pdf = subparsers.add_parser("predict-pdf", help="Extract and code an invoice PDF")
+    predict_pdf.add_argument("pdf_path", type=Path, help="Path to the invoice PDF")
+    predict_pdf.add_argument("--pretty", action="store_true", help="Pretty-print JSON output")
+    predict_pdf.set_defaults(func=_predict_pdf)
 
     args = parser.parse_args()
     args.func(args)
@@ -48,6 +54,36 @@ def _render_sql(args: argparse.Namespace) -> None:
             print(f"-- {script_name}")
             print(sql)
             print()
+
+
+def _predict_pdf(args: argparse.Namespace) -> None:
+    from poc_ankrag.cloud_clients import BigQueryCodingHistoryStore, GeminiJSONClient
+    from poc_ankrag.pipeline import run_invoice_pdf_coding
+
+    if not args.pdf_path.is_file():
+        raise FileNotFoundError(f"Invoice PDF not found: {args.pdf_path}")
+
+    config = PipelineConfig.from_env()
+    result = run_invoice_pdf_coding(
+        args.pdf_path.read_bytes(),
+        gemini=GeminiJSONClient(),
+        store=BigQueryCodingHistoryStore(config),
+        config=config,
+    )
+
+    payload = {
+        "invoice": result.invoice.to_prompt_dict(),
+        "predictions": [
+            {
+                "line_id": line.line_id,
+                "coding": prediction.to_dimensions(),
+                "estimated_accuracy": prediction.confidence,
+                "reasoning_summary": prediction.reasoning_summary,
+            }
+            for line, prediction in zip(result.invoice.lines, result.predictions, strict=True)
+        ],
+    }
+    print(json.dumps(payload, ensure_ascii=False, indent=2 if args.pretty else None))
 
 
 if __name__ == "__main__":

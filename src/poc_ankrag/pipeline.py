@@ -10,7 +10,7 @@ from poc_ankrag.config import PipelineConfig
 from poc_ankrag.ic_resolver import HistoricalICUsage, VendorICMapping, resolve_ic
 from poc_ankrag.matching import build_embedding_content, is_generic_line_description
 from poc_ankrag.models import CodingPrediction, ExtractedInvoice, HistoricalExample, VendorCodingSummary
-from poc_ankrag.prompts import build_extraction_prompt, build_prediction_prompt
+from poc_ankrag.prompts import build_extraction_prompt, build_pdf_extraction_prompt, build_prediction_prompt
 
 REQUIRED_DIMENSIONS = ("ACCOUNT", "DEPARTMENT", "PRODUCT", "IC", "PROJECT", "SYSTEM", "RESERVE")
 
@@ -20,6 +20,20 @@ class GeminiClient(Protocol):
 
     def generate_json(self, prompt: str, *, model: str) -> dict:
         """Return a JSON object produced by Gemini."""
+
+
+class GeminiPDFClient(GeminiClient, Protocol):
+    """Gemini interface for extracting invoice data from PDFs."""
+
+    def generate_json_from_pdf(
+        self,
+        prompt: str,
+        *,
+        pdf_bytes: bytes,
+        model: str,
+        mime_type: str = "application/pdf",
+    ) -> dict:
+        """Return a JSON object produced from a PDF plus prompt."""
 
 
 class CodingHistoryStore(Protocol):
@@ -61,6 +75,12 @@ class PredictionRecord:
     prediction_model: str
 
 
+@dataclass(frozen=True)
+class InvoiceCodingResult:
+    invoice: ExtractedInvoice
+    predictions: list[CodingPrediction]
+
+
 def parse_coding_prediction(payload: dict, *, resolved_ic: str) -> CodingPrediction:
     """Validate Gemini's strict JSON coding response."""
 
@@ -95,12 +115,65 @@ def run_invoice_coding(
 ) -> list[CodingPrediction]:
     """Extract an invoice, retrieve evidence, resolve IC, and predict coding dimensions."""
 
+    invoice = extract_invoice_from_text(invoice_text, gemini=gemini, config=config)
+    return code_extracted_invoice(invoice, gemini=gemini, store=store, config=config)
+
+
+def run_invoice_pdf_coding(
+    pdf_bytes: bytes,
+    *,
+    gemini: GeminiPDFClient,
+    store: CodingHistoryStore,
+    config: PipelineConfig,
+) -> InvoiceCodingResult:
+    """Extract an attached PDF invoice and predict coding dimensions for each line."""
+
+    invoice = extract_invoice_from_pdf(pdf_bytes, gemini=gemini, config=config)
+    predictions = code_extracted_invoice(invoice, gemini=gemini, store=store, config=config)
+    return InvoiceCodingResult(invoice=invoice, predictions=predictions)
+
+
+def extract_invoice_from_text(
+    invoice_text: str,
+    *,
+    gemini: GeminiClient,
+    config: PipelineConfig,
+) -> ExtractedInvoice:
+    """Extract the structured invoice object from invoice text."""
+
     extraction_prompt = build_extraction_prompt(invoice_text)
     extracted_payload = gemini.generate_json(
         extraction_prompt,
         model=config.extraction_model,
     )
-    invoice = _invoice_from_payload(extracted_payload)
+    return _invoice_from_payload(extracted_payload)
+
+
+def extract_invoice_from_pdf(
+    pdf_bytes: bytes,
+    *,
+    gemini: GeminiPDFClient,
+    config: PipelineConfig,
+) -> ExtractedInvoice:
+    """Extract the structured invoice object directly from PDF bytes using Gemini."""
+
+    extraction_prompt = build_pdf_extraction_prompt()
+    extracted_payload = gemini.generate_json_from_pdf(
+        extraction_prompt,
+        pdf_bytes=pdf_bytes,
+        model=config.extraction_model,
+    )
+    return _invoice_from_payload(extracted_payload)
+
+
+def code_extracted_invoice(
+    invoice: ExtractedInvoice,
+    *,
+    gemini: GeminiClient,
+    store: CodingHistoryStore,
+    config: PipelineConfig,
+) -> list[CodingPrediction]:
+    """Retrieve evidence, resolve IC, and predict coding dimensions for an invoice."""
 
     predictions: list[CodingPrediction] = []
     for line in invoice.lines:

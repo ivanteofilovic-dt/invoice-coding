@@ -32,6 +32,29 @@ class GeminiJSONClient:
         )
         return json.loads(response.text or "{}")
 
+    def generate_json_from_pdf(
+        self,
+        prompt: str,
+        *,
+        pdf_bytes: bytes,
+        model: str,
+        mime_type: str = "application/pdf",
+    ) -> dict:
+        try:
+            from google.genai import types
+        except ImportError as exc:
+            raise RuntimeError("Install google-genai to use GeminiJSONClient") from exc
+
+        response = self._client.models.generate_content(
+            model=model,
+            contents=[
+                prompt,
+                types.Part.from_bytes(data=pdf_bytes, mime_type=mime_type),
+            ],
+            config={"response_mime_type": "application/json"},
+        )
+        return json.loads(response.text or "{}")
+
 
 class BigQueryCodingHistoryStore:
     """BigQuery implementation of invoice coding retrieval and persistence."""

@@ -4,7 +4,7 @@ from decimal import Decimal
 
 from poc_ankrag.models import ExtractedInvoice, InvoiceLine
 from poc_ankrag.pipeline import parse_coding_prediction
-from poc_ankrag.prompts import build_extraction_prompt, build_prediction_prompt
+from poc_ankrag.prompts import build_extraction_prompt, build_pdf_extraction_prompt, build_prediction_prompt
 
 
 class PromptsAndPipelineTests(unittest.TestCase):
@@ -14,6 +14,12 @@ class PromptsAndPipelineTests(unittest.TestCase):
         self.assertIn("Preserve Swedish text exactly", prompt)
         self.assertIn('"vendor": "string"', prompt)
         self.assertIn("Faktura för mobilabonnemang", prompt)
+
+    def test_pdf_extraction_prompt_uses_attached_invoice(self):
+        prompt = build_pdf_extraction_prompt()
+
+        self.assertIn("attached PDF invoice", prompt)
+        self.assertIn('"invoice_number": "string"', prompt)
 
     def test_prediction_prompt_includes_ic_and_required_dimensions(self):
         invoice = ExtractedInvoice(
@@ -40,6 +46,7 @@ class PromptsAndPipelineTests(unittest.TestCase):
 
         self.assertIn("must be copied exactly: IC123", prompt)
         self.assertIn('"ACCOUNT": "string"', prompt)
+        self.assertIn('"confidence": "number between 0 and 1"', prompt)
         self.assertIn("Mobilabonnemang mars", prompt)
 
     def test_parse_coding_prediction_requires_rule_resolved_ic(self):

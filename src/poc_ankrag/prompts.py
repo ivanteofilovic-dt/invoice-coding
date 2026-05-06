@@ -24,7 +24,7 @@ EXTRACTION_SCHEMA: dict[str, Any] = {
     ],
 }
 
-PREDICTION_SCHEMA: dict[str, str] = {
+PREDICTION_SCHEMA: dict[str, Any] = {
     "ACCOUNT": "string",
     "DEPARTMENT": "string",
     "PRODUCT": "string",
@@ -32,6 +32,8 @@ PREDICTION_SCHEMA: dict[str, str] = {
     "PROJECT": "string",
     "SYSTEM": "string",
     "RESERVE": "string",
+    "confidence": "number between 0 and 1",
+    "reasoning_summary": "short string",
 }
 
 
@@ -57,6 +59,26 @@ def build_extraction_prompt(invoice_text: str) -> str:
             "",
             "Invoice text:",
             invoice_text,
+        ]
+    )
+
+
+def build_pdf_extraction_prompt() -> str:
+    """Build the PDF-to-JSON extraction prompt for Gemini multimodal input."""
+
+    return "\n".join(
+        [
+            "Extract structured invoice data from the attached PDF invoice.",
+            "",
+            "Rules:",
+            "- Preserve Swedish text exactly where possible.",
+            "- Do not infer GL coding dimensions.",
+            "- Return only strict JSON matching the schema.",
+            "- Keep invoice references and OCR artifacts in description when no better line description exists.",
+            "- If the PDF contains multiple pages, include invoice lines from all pages.",
+            "",
+            "Schema:",
+            _json_dumps(EXTRACTION_SCHEMA),
         ]
     )
 
@@ -91,7 +113,7 @@ def build_prediction_prompt(
             "",
             f"The IC value is rule-resolved and must be copied exactly: {resolved_ic}",
             "",
-            "Return only strict JSON with this schema:",
+            "Return only strict JSON with this schema. Confidence is an estimated accuracy score for this prediction, where 1.0 means very strong historical support and 0.0 means unsupported.",
             _json_dumps(PREDICTION_SCHEMA),
             "",
             "Invoice line:",
