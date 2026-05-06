@@ -99,6 +99,7 @@ class PredictionRecord:
 class InvoiceCodingResult:
     invoice: ExtractedInvoice
     predictions: list[CodingPrediction]
+    historical_examples_by_line_id: dict[str, list[HistoricalExample]]
 
 
 def parse_coding_prediction(payload: dict, *, resolved_ic: str) -> CodingPrediction:
@@ -149,8 +150,17 @@ def run_invoice_pdf_coding(
     """Extract an attached PDF invoice and predict coding dimensions for each line."""
 
     invoice = extract_invoice_from_pdf(pdf_bytes, gemini=gemini, config=config)
-    predictions = code_extracted_invoice(invoice, gemini=gemini, store=store, config=config)
-    return InvoiceCodingResult(invoice=invoice, predictions=predictions)
+    predictions, historical_examples_by_line_id = _code_extracted_invoice_with_evidence(
+        invoice,
+        gemini=gemini,
+        store=store,
+        config=config,
+    )
+    return InvoiceCodingResult(
+        invoice=invoice,
+        predictions=predictions,
+        historical_examples_by_line_id=historical_examples_by_line_id,
+    )
 
 
 def extract_invoice_from_text(
@@ -195,8 +205,26 @@ def code_extracted_invoice(
 ) -> list[CodingPrediction]:
     """Retrieve evidence, resolve IC, and predict coding dimensions for an invoice."""
 
+    predictions, _ = _code_extracted_invoice_with_evidence(
+        invoice,
+        gemini=gemini,
+        store=store,
+        config=config,
+    )
+    return predictions
+
+
+def _code_extracted_invoice_with_evidence(
+    invoice: ExtractedInvoice,
+    *,
+    gemini: GeminiClient,
+    store: CodingHistoryStore,
+    config: PipelineConfig,
+) -> tuple[list[CodingPrediction], dict[str, list[HistoricalExample]]]:
+    """Retrieve evidence, resolve IC, and predict coding dimensions for an invoice."""
+
     if not invoice.lines:
-        return []
+        return [], {}
 
     vendor_summary = store.fetch_vendor_summary(invoice.vendor, limit=50)
     ic_resolution = resolve_ic(
@@ -255,7 +283,7 @@ def code_extracted_invoice(
         predictions.append(prediction)
 
     _save_predictions(store, prediction_records)
-    return predictions
+    return predictions, examples_by_line_id
 
 
 def _search_similar_lines_batch(

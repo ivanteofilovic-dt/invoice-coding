@@ -2,7 +2,7 @@ import { ChangeEvent, DragEvent, useState } from "react";
 import { FileText, UploadCloud } from "lucide-react";
 
 type UploadPanelProps = {
-  onUpload: (file: File) => void;
+  onUpload: (files: File[]) => void;
   onDemo: () => void;
 };
 
@@ -10,14 +10,15 @@ export function UploadPanel({ onUpload, onDemo }: UploadPanelProps) {
   const [isDragging, setIsDragging] = useState(false);
 
   const handleFiles = (files: FileList | null) => {
-    const file = files?.item(0);
-    if (file) {
-      onUpload(file);
+    const selectedFiles = Array.from(files ?? []);
+    if (selectedFiles.length > 0) {
+      onUpload(selectedFiles);
     }
   };
 
   const onInputChange = (event: ChangeEvent<HTMLInputElement>) => {
     handleFiles(event.target.files);
+    event.target.value = "";
   };
 
   const onDrop = (event: DragEvent<HTMLLabelElement>) => {
@@ -46,13 +47,13 @@ export function UploadPanel({ onUpload, onDemo }: UploadPanelProps) {
         onDragLeave={() => setIsDragging(false)}
         onDrop={onDrop}
       >
-        <input type="file" accept="application/pdf,.pdf" onChange={onInputChange} />
+        <input type="file" accept="application/pdf,.pdf" multiple onChange={onInputChange} />
         <span className="upload-dropzone__icon">
           <UploadCloud size={44} />
         </span>
         <strong>Click to upload</strong>
-        <span>or drag and drop a PDF invoice</span>
-        <small>Maximum file size: 10 MB</small>
+        <span>or drag and drop PDF invoices</span>
+        <small>Maximum file size: 10 MB per PDF</small>
       </label>
 
       <button type="button" className="demo-button" onClick={onDemo}>

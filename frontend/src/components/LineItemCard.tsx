@@ -78,8 +78,8 @@ export function LineItemCard({ line, index, currency }: LineItemCardProps) {
                   </tr>
                 </thead>
                 <tbody>
-                  {line.historicalLines.map((history) => (
-                    <tr key={`${history.desc}-${history.account}-${history.dept}`}>
+                  {line.historicalLines.map((history, historyIndex) => (
+                    <tr key={`${history.date ?? "no-date"}-${history.desc}-${history.account}-${history.dept}-${historyIndex}`}>
                       <td title={history.desc}>{history.desc}</td>
                       <td>{history.account}</td>
                       <td>{history.dept}</td>
@@ -91,7 +91,7 @@ export function LineItemCard({ line, index, currency }: LineItemCardProps) {
             ) : (
               <p className="empty-history">
                 <AlertCircle size={16} />
-                Historical evidence is used by the backend pipeline but is not persisted in this response yet.
+                No similar historical lines were returned for this invoice line.
               </p>
             )}
           </aside>

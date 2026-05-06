@@ -17,7 +17,7 @@ from starlette.concurrency import run_in_threadpool
 
 from poc_ankrag.cloud_clients import BigQueryCodingHistoryStore, GeminiJSONClient
 from poc_ankrag.config import PipelineConfig
-from poc_ankrag.models import CodingPrediction, ExtractedInvoice, InvoiceLine
+from poc_ankrag.models import CodingPrediction, ExtractedInvoice, HistoricalExample, InvoiceLine
 from poc_ankrag.pipeline import InvoiceCodingResult, run_invoice_pdf_coding
 
 MAX_UPLOAD_BYTES = 10 * 1024 * 1024
@@ -117,7 +117,12 @@ async def code_invoice(file: UploadFile = File(...)) -> InvoiceCodingResponse:
             detail=f"Invoice coding failed: {exc}",
         ) from exc
 
-    return _to_response(result.invoice, result.predictions, source_file_name=file.filename)
+    return _to_response(
+        result.invoice,
+        result.predictions,
+        result.historical_examples_by_line_id,
+        source_file_name=file.filename,
+    )
 
 
 @app.post("/api/invoices/batch/code", response_model=BatchInvoiceCodingResponse)
@@ -130,7 +135,15 @@ async def code_invoice_batch(files: list[UploadFile] = File(...)) -> BatchInvoic
             try:
                 pdf_bytes = await _read_pdf_upload(file)
                 result = await run_in_threadpool(_run_pdf_coding, pdf_bytes)
-                return _to_response(result.invoice, result.predictions, source_file_name=file.filename), None
+                return (
+                    _to_response(
+                        result.invoice,
+                        result.predictions,
+                        result.historical_examples_by_line_id,
+                        source_file_name=file.filename,
+                    ),
+                    None,
+                )
             except HTTPException as exc:
                 detail = str(exc.detail)
                 logger.warning("Skipping invoice upload %s: %s", file.filename, detail)
@@ -208,9 +221,11 @@ def _run_pdf_coding(pdf_bytes: bytes) -> InvoiceCodingResult:
 def _to_response(
     invoice: ExtractedInvoice,
     predictions: list[CodingPrediction],
+    historical_examples_by_line_id: dict[str, list[HistoricalExample]] | None = None,
     *,
     source_file_name: str | None = None,
 ) -> InvoiceCodingResponse:
+    historical_examples_by_line_id = historical_examples_by_line_id or {}
     return InvoiceCodingResponse(
         vendor=invoice.vendor,
         invoiceNumber=invoice.invoice_number,
@@ -219,13 +234,21 @@ def _to_response(
         currency=invoice.currency,
         sourceFileName=source_file_name,
         lineItems=[
-            _line_to_response(line, prediction)
+            _line_to_response(
+                line,
+                prediction,
+                historical_examples_by_line_id.get(line.line_id, []),
+            )
             for line, prediction in zip(invoice.lines, predictions, strict=True)
         ],
     )
 
 
-def _line_to_response(line: InvoiceLine, prediction: CodingPrediction) -> InvoiceLineResponse:
+def _line_to_response(
+    line: InvoiceLine,
+    prediction: CodingPrediction,
+    historical_examples: list[HistoricalExample],
+) -> InvoiceLineResponse:
     quantity = _decimal_to_float(line.quantity)
     total = _decimal_to_float(line.amount) or 0.0
     unit_price = total / quantity if quantity else None
@@ -238,7 +261,18 @@ def _line_to_response(line: InvoiceLine, prediction: CodingPrediction) -> Invoic
         coding=prediction.to_dimensions(),
         confidence=prediction.confidence,
         reasoning=prediction.reasoning_summary,
-        historicalLines=[],
+        historicalLines=[_historical_line_to_response(example) for example in historical_examples],
+    )
+
+
+def _historical_line_to_response(example: HistoricalExample) -> HistoricalLineResponse:
+    similarity = max(0.0, min(1.0, 1.0 - example.distance))
+    return HistoricalLineResponse(
+        date=example.posting_date.isoformat() if example.posting_date else None,
+        desc=example.gl_line_description,
+        account=example.account,
+        dept=example.department,
+        similarity=f"{round(similarity * 100)}%",
     )
 
 

@@ -10,6 +10,7 @@ from uuid import uuid4
 
 from poc_ankrag.config import PipelineConfig
 from poc_ankrag.ic_resolver import HistoricalICUsage, VendorICMapping
+from poc_ankrag.matching import build_embedding_content
 from poc_ankrag.models import HistoricalExample, VendorCodingSummary
 from poc_ankrag.pipeline import PredictionRecord, SimilarLineSearch
 
@@ -294,16 +295,141 @@ class BigQueryCodingHistoryStore:
             return
 
         table_id = f"{self._config.project_id}.{self._config.dataset_id}.invoice_coding_predictions"
-        rows = [self._prediction_row(prediction) for prediction in predictions]
+        created_at = datetime.now(timezone.utc)
+        prediction_ids = [str(uuid4()) for _ in predictions]
+        rows = [
+            self._prediction_row(prediction, prediction_id, created_at)
+            for prediction, prediction_id in zip(predictions, prediction_ids, strict=True)
+        ]
         errors = self._client.insert_rows_json(table_id, rows)
         if errors:
             raise RuntimeError(f"Failed to insert prediction audit rows: {errors}")
+        self._append_predictions_to_history(predictions, prediction_ids)
+
+    def _append_predictions_to_history(
+        self,
+        predictions: list[PredictionRecord],
+        prediction_ids: list[str],
+    ) -> None:
+        input_rows_sql = "\nUNION ALL\n".join(
+            f"""
+          SELECT
+            @history_row_id_{index} AS row_id,
+            CAST(NULL AS STRING) AS ENTITY,
+            'AUTOMATED_INVOICE_CODING' AS GL_SOURCE_NAME,
+            'Purchase Invoices' AS GL_CATEGORY,
+            @invoice_number_{index} AS JOURNAL_NUMBER,
+            SAFE_CAST(@invoice_date_{index} AS DATE) AS POSTING_DATE,
+            FORMAT_DATE('%Y-%m', SAFE_CAST(@invoice_date_{index} AS DATE)) AS PERIOD,
+            @account_{index} AS ACCOUNT,
+            @account_{index} AS HFM_ACCOUNT,
+            @reasoning_summary_{index} AS HFM_DSCRIPTIONS,
+            @department_{index} AS DEPARTMENT,
+            @product_{index} AS PRODUCT,
+            CAST(NULL AS STRING) AS WORK_ORDER,
+            @ic_{index} AS IC,
+            @project_{index} AS PROJECT,
+            @system_{index} AS SYSTEM,
+            @reserve_{index} AS RESERVE,
+            @invoice_number_{index} AS INVOICE_NUM,
+            CAST(NULL AS STRING) AS SUPPLIER_NUMBER,
+            @vendor_{index} AS SUPPLIER_CUSTMER_NAME,
+            @line_description_{index} AS GL_LINE_DESCRIPTION,
+            CAST(NULL AS STRING) AS PO_NUMBER,
+            SAFE_CAST(@amount_{index} AS NUMERIC) AS AMOUNT,
+            'Automated Invoice Coding' AS TRANSACTION_TYPE_NAME,
+            CAST(NULL AS STRING) AS GL_TAX,
+            CAST(NULL AS STRING) AS SUBLEDGER_TAX_CODE,
+            CAST(NULL AS STRING) AS EMPLOYEE_NAME,
+            @embedding_text_{index} AS embedding_text,
+            @embedding_text_{index} AS content
+            """
+            for index, _ in enumerate(predictions)
+        )
+        query = f"""
+        INSERT INTO `{self._config.project_id}.{self._config.dataset_id}.gl_coding_history` (
+          row_id,
+          ENTITY,
+          GL_SOURCE_NAME,
+          GL_CATEGORY,
+          JOURNAL_NUMBER,
+          POSTING_DATE,
+          PERIOD,
+          ACCOUNT,
+          HFM_ACCOUNT,
+          HFM_DSCRIPTIONS,
+          DEPARTMENT,
+          PRODUCT,
+          WORK_ORDER,
+          IC,
+          PROJECT,
+          SYSTEM,
+          RESERVE,
+          INVOICE_NUM,
+          SUPPLIER_NUMBER,
+          SUPPLIER_CUSTMER_NAME,
+          GL_LINE_DESCRIPTION,
+          PO_NUMBER,
+          AMOUNT,
+          TRANSACTION_TYPE_NAME,
+          GL_TAX,
+          SUBLEDGER_TAX_CODE,
+          EMPLOYEE_NAME,
+          embedding_text,
+          embedding
+        )
+        WITH prediction_history AS (
+          {input_rows_sql}
+        )
+        SELECT
+          h.* EXCEPT(content),
+          e.ml_generate_embedding_result AS embedding
+        FROM prediction_history AS h
+        JOIN ML.GENERATE_EMBEDDING(
+          MODEL `{self._config.project_id}.{self._config.dataset_id}.gl_embedding_model`,
+          (SELECT row_id, content FROM prediction_history),
+          STRUCT(TRUE AS flatten_json_output)
+        ) AS e
+        USING (row_id)
+        """
+        params: dict[str, Any] = {}
+        for index, prediction in enumerate(predictions):
+            line = next(item for item in prediction.invoice.lines if item.line_id == prediction.line_id)
+            params.update(
+                {
+                    f"history_row_id_{index}": f"prediction:{prediction_ids[index]}",
+                    f"invoice_number_{index}": prediction.invoice.invoice_number,
+                    f"invoice_date_{index}": prediction.invoice.invoice_date.isoformat()
+                    if prediction.invoice.invoice_date
+                    else None,
+                    f"account_{index}": prediction.prediction.account,
+                    f"reasoning_summary_{index}": prediction.prediction.reasoning_summary,
+                    f"department_{index}": prediction.prediction.department,
+                    f"product_{index}": prediction.prediction.product,
+                    f"ic_{index}": prediction.prediction.ic,
+                    f"project_{index}": prediction.prediction.project,
+                    f"system_{index}": prediction.prediction.system,
+                    f"reserve_{index}": prediction.prediction.reserve,
+                    f"vendor_{index}": prediction.invoice.vendor,
+                    f"line_description_{index}": line.description,
+                    f"amount_{index}": str(line.amount),
+                    f"embedding_text_{index}": build_embedding_content(
+                        prediction.invoice.vendor,
+                        line.description,
+                    ),
+                }
+            )
+        self._client.query(query, job_config=self._job_config(**params)).result()
 
     @staticmethod
-    def _prediction_row(prediction: PredictionRecord) -> dict[str, Any]:
+    def _prediction_row(
+        prediction: PredictionRecord,
+        prediction_id: str,
+        created_at: datetime,
+    ) -> dict[str, Any]:
         line = next(item for item in prediction.invoice.lines if item.line_id == prediction.line_id)
         return {
-            "prediction_id": str(uuid4()),
+            "prediction_id": prediction_id,
             "invoice_number": prediction.invoice.invoice_number,
             "vendor": prediction.invoice.vendor,
             "invoice_date": prediction.invoice.invoice_date.isoformat()
@@ -325,7 +451,7 @@ class BigQueryCodingHistoryStore:
             "extraction_model": prediction.extraction_model,
             "prediction_model": prediction.prediction_model,
             "vector_example_row_ids": prediction.vector_example_row_ids,
-            "created_at": datetime.now(timezone.utc).isoformat(),
+            "created_at": created_at.isoformat(),
         }
 
     def _job_config(self, **params: Any) -> Any:

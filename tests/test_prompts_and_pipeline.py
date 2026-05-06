@@ -3,8 +3,8 @@ from datetime import date
 from decimal import Decimal
 
 from poc_ankrag.config import PipelineConfig
-from poc_ankrag.models import ExtractedInvoice, InvoiceLine
-from poc_ankrag.pipeline import code_extracted_invoice, parse_coding_prediction
+from poc_ankrag.models import ExtractedInvoice, HistoricalExample, InvoiceLine
+from poc_ankrag.pipeline import code_extracted_invoice, parse_coding_prediction, run_invoice_pdf_coding
 from poc_ankrag.prompts import build_extraction_prompt, build_pdf_extraction_prompt, build_prediction_prompt
 
 
@@ -90,6 +90,20 @@ class PromptsAndPipelineTests(unittest.TestCase):
         self.assertEqual(store.batch_search_line_count, 2)
         self.assertEqual(store.saved_prediction_count, 2)
 
+    def test_run_invoice_pdf_coding_returns_historical_evidence(self):
+        gemini = _FakeGemini()
+        store = _FakeStore()
+        config = PipelineConfig(project_id="project", dataset_id="dataset", raw_gl_table="raw")
+
+        result = run_invoice_pdf_coding(b"%PDF", gemini=gemini, store=store, config=config)
+
+        self.assertEqual(len(result.predictions), 2)
+        self.assertEqual(set(result.historical_examples_by_line_id), {"line-001", "line-002"})
+        self.assertEqual(
+            result.historical_examples_by_line_id["line-001"][0].gl_line_description,
+            "Historical Mobilabonnemang",
+        )
+
 
 class _FakeGemini:
     def __init__(self) -> None:
@@ -108,6 +122,25 @@ class _FakeGemini:
             "confidence": 0.9,
         }
 
+    def generate_json_from_pdf(
+        self,
+        prompt: str,
+        *,
+        pdf_bytes: bytes,
+        model: str,
+        mime_type: str = "application/pdf",
+    ) -> dict:
+        return {
+            "vendor": "Telia Sverige AB",
+            "invoice_number": "INV-1",
+            "invoice_date": "2026-05-06",
+            "currency": "SEK",
+            "lines": [
+                {"line_id": "line-001", "description": "Mobilabonnemang", "amount": "100"},
+                {"line_id": "line-002", "description": "Router", "amount": "200"},
+            ],
+        }
+
 
 class _FakeStore:
     def __init__(self) -> None:
@@ -119,7 +152,27 @@ class _FakeStore:
 
     def search_similar_lines_batch(self, searches, *, top_k: int = 20):
         self.batch_search_line_count = len(searches)
-        return {search.line_id: [] for search in searches}
+        return {
+            search.line_id: [
+                HistoricalExample(
+                    historical_row_id=f"hist-{search.line_id}",
+                    supplier_customer_name=search.vendor,
+                    gl_line_description=f"Historical {search.line_description}",
+                    hfm_descriptions="Historical coding",
+                    account="61000",
+                    department="1S1234",
+                    product="1S00000",
+                    ic="",
+                    project="000000",
+                    system="000000",
+                    reserve="1S0000000000",
+                    amount=Decimal("100"),
+                    posting_date=date(2026, 4, 1),
+                    distance=0.05,
+                )
+            ]
+            for search in searches
+        }
 
     def fetch_vendor_summary(self, vendor: str, *, limit: int = 50):
         self.vendor_summary_calls += 1

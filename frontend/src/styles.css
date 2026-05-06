@@ -237,6 +237,11 @@ button {
   margin: 0;
 }
 
+.processing-card__hint {
+  margin: -0.45rem 0 0;
+  color: #64748b;
+}
+
 .spinner-wrap {
   position: relative;
   display: grid;
@@ -304,6 +309,98 @@ button {
   flex-wrap: wrap;
   justify-content: center;
   gap: 0.75rem;
+}
+
+.batch-summary {
+  display: grid;
+  gap: 0.9rem;
+  margin-bottom: 1.2rem;
+}
+
+.batch-summary__stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.batch-summary__stats span {
+  border: 1px solid #e2e8f0;
+  border-radius: 999px;
+  padding: 0.45rem 0.75rem;
+  color: #475569;
+  background: white;
+  font-size: 0.9rem;
+}
+
+.batch-summary__stats strong {
+  color: #0f172a;
+}
+
+.invoice-tabs {
+  display: flex;
+  gap: 0.65rem;
+  overflow-x: auto;
+  padding-bottom: 0.25rem;
+}
+
+.invoice-tab {
+  display: grid;
+  min-width: 13rem;
+  gap: 0.2rem;
+  border: 1px solid #e2e8f0;
+  border-radius: 0.9rem;
+  padding: 0.7rem 0.8rem;
+  color: #475569;
+  background: white;
+  text-align: left;
+}
+
+.invoice-tab--active {
+  border-color: #818cf8;
+  color: #312e81;
+  background: #eef2ff;
+}
+
+.invoice-tab span,
+.invoice-tab small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.invoice-tab span {
+  font-weight: 800;
+}
+
+.invoice-tab small {
+  color: #64748b;
+}
+
+.batch-errors {
+  display: grid;
+  gap: 0.45rem;
+  max-height: 12rem;
+  overflow: auto;
+  border: 1px solid #fecaca;
+  border-radius: 0.9rem;
+  padding: 0.75rem;
+  color: #7f1d1d;
+  background: #fef2f2;
+  text-align: left;
+}
+
+.batch-errors p {
+  display: flex;
+  gap: 0.45rem;
+  margin: 0;
+  color: inherit;
+  font-size: 0.88rem;
+  line-height: 1.45;
+}
+
+.batch-errors svg {
+  flex: 0 0 auto;
+  margin-top: 0.15rem;
 }
 
 .results-layout {

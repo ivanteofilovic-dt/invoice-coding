@@ -37,3 +37,16 @@ export type InvoiceCodingResult = {
   sourceFileName: string | null;
   lineItems: InvoiceLineItem[];
 };
+
+export type BatchInvoiceError = {
+  fileName: string | null;
+  error: string;
+};
+
+export type BatchInvoiceCodingResult = {
+  total: number;
+  succeeded: number;
+  failed: number;
+  invoices: InvoiceCodingResult[];
+  errors: BatchInvoiceError[];
+};

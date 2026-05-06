@@ -2,6 +2,7 @@ import { CheckCircle2, Cpu, Database, FileText, Network } from "lucide-react";
 
 type ProcessingPanelProps = {
   fileName: string;
+  fileCount?: number;
 };
 
 const steps = [
@@ -22,7 +23,9 @@ const steps = [
   }
 ];
 
-export function ProcessingPanel({ fileName }: ProcessingPanelProps) {
+export function ProcessingPanel({ fileName, fileCount = 1 }: ProcessingPanelProps) {
+  const isBatch = fileCount > 1;
+
   return (
     <section className="processing-card" aria-live="polite">
       <div className="spinner-wrap">
@@ -30,7 +33,8 @@ export function ProcessingPanel({ fileName }: ProcessingPanelProps) {
         <Cpu size={34} />
       </div>
       <p className="eyebrow">Processing</p>
-      <h2>{fileName}</h2>
+      <h2>{isBatch ? `${fileCount} invoices` : fileName}</h2>
+      {isBatch && <p className="processing-card__hint">This can take a while; files are processed in parallel.</p>}
       <div className="processing-steps">
         {steps.map((step, index) => {
           const Icon = step.icon;
