@@ -8,8 +8,6 @@ type MockPdfViewerProps = {
 };
 
 export function MockPdfViewer({ fileName, data }: MockPdfViewerProps) {
-  const total = parseNumber(data.totalAmount);
-
   return (
     <aside className="pdf-viewer" aria-label="Invoice preview">
       <div className="pdf-toolbar">
@@ -28,26 +26,18 @@ export function MockPdfViewer({ fileName, data }: MockPdfViewerProps) {
         <div className="invoice-page">
           <header className="invoice-page__header">
             <div>
-              <h2>EXCLUSIVE<br />NETWORKS</h2>
-              <p>Box 1234, 111 22 Stockholm, Sweden<br />Org.nr: 556123-4567<br />VAT: SE556123456701</p>
+              <h2 style={{ whiteSpace: "pre-line" }}>{data.vendor.trim() || "—"}</h2>
             </div>
             <div>
               <h3>INVOICE</h3>
               <dl>
                 <dt>Invoice No:</dt>
-                <dd>{data.invoiceNumber}</dd>
+                <dd>{data.invoiceNumber || "—"}</dd>
                 <dt>Invoice Date:</dt>
-                <dd>{data.date ?? "Unknown"}</dd>
-                <dt>Due Date:</dt>
-                <dd>2026-04-14</dd>
+                <dd>{data.date ?? "—"}</dd>
               </dl>
             </div>
           </header>
-
-          <section className="bill-to">
-            <h4>Bill to</h4>
-            <p><strong>Telenor Sweden AB</strong><br />Katarinavagen 15<br />116 45 Stockholm<br />Sweden</p>
-          </section>
 
           <table className="invoice-lines">
             <thead>
@@ -59,11 +49,10 @@ export function MockPdfViewer({ fileName, data }: MockPdfViewerProps) {
               </tr>
             </thead>
             <tbody>
-              {data.lineItems.map((line, index) => (
+              {data.lineItems.map((line) => (
                 <tr key={line.id}>
                   <td>
                     <strong>{line.description}</strong>
-                    {line.description.includes("FC-10") && <small>S/N: FWS2490812{index}</small>}
                   </td>
                   <td>{line.quantity ?? "N/A"}</td>
                   <td>{formatAmount(line.unitPrice)}</td>
@@ -75,14 +64,6 @@ export function MockPdfViewer({ fileName, data }: MockPdfViewerProps) {
 
           <footer className="invoice-total">
             <div>
-              <span>Subtotal</span>
-              <strong>{formatAmount(total * 0.8)}</strong>
-            </div>
-            <div>
-              <span>VAT (25%)</span>
-              <strong>{formatAmount(total * 0.2)}</strong>
-            </div>
-            <div>
               <span>Total {data.currency}</span>
               <strong>{data.totalAmount}</strong>
             </div>
@@ -91,10 +72,6 @@ export function MockPdfViewer({ fileName, data }: MockPdfViewerProps) {
       </div>
     </aside>
   );
-}
-
-function parseNumber(value: string) {
-  return Number(value.replace(/,/g, "")) || 0;
 }
 
 function formatAmount(value: number | null) {
