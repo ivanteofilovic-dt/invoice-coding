@@ -5,10 +5,8 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-from datetime import date
 from decimal import Decimal
 from functools import lru_cache
-from typing import Any
 
 from fastapi import FastAPI, File, HTTPException, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -178,11 +176,6 @@ async def code_invoice_batch(files: list[UploadFile] = File(...)) -> BatchInvoic
     )
 
 
-@app.get("/api/demo-invoice", response_model=InvoiceCodingResponse)
-def demo_invoice() -> InvoiceCodingResponse:
-    return _demo_response()
-
-
 async def _read_pdf_upload(file: UploadFile) -> bytes:
     if not _is_pdf_upload(file):
         raise HTTPException(
@@ -300,108 +293,3 @@ def _decimal_to_float(value: Decimal | None) -> float | None:
 
 def _format_amount(value: Decimal) -> str:
     return f"{value:,.2f}"
-
-
-def _demo_response() -> InvoiceCodingResponse:
-    demo_payload: dict[str, Any] = {
-        "vendor": "Exclusive Networks Sweden AB",
-        "invoiceNumber": "INSE010035371",
-        "date": date(2026, 3, 15).isoformat(),
-        "totalAmount": "3,413.36",
-        "currency": "SEK",
-        "sourceFileName": "INSE010035371_ExclusiveNetworks.pdf",
-        "lineItems": [
-            {
-                "id": "line-1",
-                "description": "FC-10-S12FP-247-02-12 Firewall appliance",
-                "quantity": 2,
-                "unitPrice": 1281.68,
-                "total": 2563.36,
-                "coding": {
-                    "ACCOUNT": "40190",
-                    "DEPARTMENT": "F82250",
-                    "PRODUCT": "F800000",
-                    "IC": "00",
-                    "PROJECT": "000000",
-                    "SYSTEM": "000000",
-                    "RESERVE": "F80000000000",
-                },
-                "confidence": 0.98,
-                "reasoning": (
-                    "High confidence prediction based on strong historical precedent. "
-                    "The vendor and Fortinet product code have repeatedly mapped to hardware coding."
-                ),
-                "historicalLines": [
-                    {
-                        "date": "2026-02-10",
-                        "supplierName": "Exclusive Networks Sweden AB",
-                        "desc": "FC-10-S12FP-247-02-12 Firewall",
-                        "hfmDescription": "Network hardware and firewall appliances",
-                        "account": "40190",
-                        "dept": "F82250",
-                        "product": "F800000",
-                        "ic": "00",
-                        "project": "000000",
-                        "system": "000000",
-                        "reserve": "F80000000000",
-                        "amount": 2563.36,
-                        "similarity": "99%",
-                    },
-                    {
-                        "date": "2026-01-22",
-                        "supplierName": "Exclusive Networks Sweden AB",
-                        "desc": "FC-10-F108F-247-02-12 Firewall app.",
-                        "hfmDescription": "Network hardware and firewall appliances",
-                        "account": "40190",
-                        "dept": "F82250",
-                        "product": "F800000",
-                        "ic": "00",
-                        "project": "000000",
-                        "system": "000000",
-                        "reserve": "F80000000000",
-                        "amount": 1980.0,
-                        "similarity": "92%",
-                    },
-                ],
-            },
-            {
-                "id": "line-2",
-                "description": "Installation Services & Setup - Remote",
-                "quantity": 1,
-                "unitPrice": 850.0,
-                "total": 850.0,
-                "coding": {
-                    "ACCOUNT": "60110",
-                    "DEPARTMENT": "F82250",
-                    "PRODUCT": "F800000",
-                    "IC": "00",
-                    "PROJECT": "000000",
-                    "SYSTEM": "000000",
-                    "RESERVE": "F80000000000",
-                },
-                "confidence": 0.82,
-                "reasoning": (
-                    "Prediction based on semantic matching for installation services tied to the "
-                    "same vendor and department context as the primary hardware purchase."
-                ),
-                "historicalLines": [
-                    {
-                        "date": "2026-01-22",
-                        "supplierName": "Exclusive Networks Sweden AB",
-                        "desc": "Consulting - setup",
-                        "hfmDescription": "Consultancy IS/IT",
-                        "account": "60110",
-                        "dept": "F82250",
-                        "product": "F800000",
-                        "ic": "00",
-                        "project": "000000",
-                        "system": "000000",
-                        "reserve": "F80000000000",
-                        "amount": 850.0,
-                        "similarity": "88%",
-                    }
-                ],
-            },
-        ],
-    }
-    return InvoiceCodingResponse.model_validate(demo_payload)

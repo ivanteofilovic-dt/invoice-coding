@@ -221,7 +221,6 @@ button {
   color: #64748b;
 }
 
-.demo-button,
 .button {
   display: inline-flex;
   align-items: center;
@@ -231,12 +230,6 @@ button {
   border-radius: 0.9rem;
   padding: 0.7rem 1rem;
   font-weight: 800;
-}
-
-.demo-button {
-  justify-self: center;
-  color: #4338ca;
-  background: #eef2ff;
 }
 
 .button--primary {

@@ -1,12 +1,11 @@
 import { ChangeEvent, DragEvent, useState } from "react";
-import { FileText, UploadCloud } from "lucide-react";
+import { UploadCloud } from "lucide-react";
 
 type UploadPanelProps = {
   onUpload: (files: File[]) => void;
-  onDemo: () => void;
 };
 
-export function UploadPanel({ onUpload, onDemo }: UploadPanelProps) {
+export function UploadPanel({ onUpload }: UploadPanelProps) {
   const [isDragging, setIsDragging] = useState(false);
 
   const handleFiles = (files: FileList | null) => {
@@ -55,11 +54,6 @@ export function UploadPanel({ onUpload, onDemo }: UploadPanelProps) {
         <span>or drag and drop PDF invoices</span>
         <small>Maximum file size: 10 MB per PDF</small>
       </label>
-
-      <button type="button" className="demo-button" onClick={onDemo}>
-        <FileText size={18} />
-        Open sample invoice result
-      </button>
     </section>
   );
 }

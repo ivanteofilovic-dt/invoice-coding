@@ -81,7 +81,6 @@ The API exposes:
 - `GET /api/health` for a lightweight health check
 - `POST /api/invoices/code` for PDF invoice upload and coding
 - `POST /api/invoices/batch/code` for multi-PDF upload with local bounded parallel processing
-- `GET /api/demo-invoice` for the sample UI result without Google Cloud credentials
 
 Batch processing does not require extra cloud resources. The API processes uploaded PDFs in
 parallel inside the FastAPI process, keeps successful invoices even when individual files fail,

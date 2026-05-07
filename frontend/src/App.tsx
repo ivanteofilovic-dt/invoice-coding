@@ -1,7 +1,7 @@
 import { useCallback, useState } from "react";
 import { AlertCircle } from "lucide-react";
 
-import { fetchDemoInvoice, codeInvoice, codeInvoices } from "./lib/api";
+import { codeInvoice, codeInvoices } from "./lib/api";
 import { addResultsToCodingHistory, loadCodingHistory } from "./lib/history";
 import type { BatchInvoiceError, CodingHistoryEntry, InvoiceCodingResult } from "./types";
 import { AppHeader } from "./components/AppHeader";
@@ -51,23 +51,6 @@ export default function App() {
     }
   }, []);
 
-  const loadDemo = useCallback(async () => {
-    setActiveView("upload");
-    setError(null);
-    setBatchErrors([]);
-    setState("processing");
-    setSelectedFiles([]);
-
-    try {
-      const response = await fetchDemoInvoice();
-      setResults([response]);
-      setState("complete");
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Demo invoice could not be loaded.");
-      setState("error");
-    }
-  }, []);
-
   const reset = () => {
     setActiveView("upload");
     setSelectedFiles([]);
@@ -94,10 +77,10 @@ export default function App() {
         {activeView === "history" && <HistoryView entries={codingHistory} onUpload={reset} />}
         {activeView === "upload" && (
           <>
-            {state === "idle" && <UploadPanel onUpload={processFiles} onDemo={loadDemo} />}
+            {state === "idle" && <UploadPanel onUpload={processFiles} />}
             {state === "processing" && (
               <ProcessingPanel
-                fileName={selectedFiles[0]?.name ?? "Demo invoice"}
+                fileName={selectedFiles[0]?.name ?? "Invoice"}
                 fileCount={selectedFiles.length || 1}
               />
             )}
@@ -117,11 +100,8 @@ export default function App() {
                   ))}
                 </div>
                 <div className="error-card__actions">
-                  <button className="button button--secondary" onClick={reset}>
+                  <button className="button button--primary" onClick={reset}>
                     Try another batch
-                  </button>
-                  <button className="button button--primary" onClick={loadDemo}>
-                    Load demo result
                   </button>
                 </div>
               </section>
@@ -132,11 +112,8 @@ export default function App() {
                 <h2>Could not process invoice</h2>
                 <p>{error}</p>
                 <div className="error-card__actions">
-                  <button className="button button--secondary" onClick={reset}>
+                  <button className="button button--primary" onClick={reset}>
                     Try another file
-                  </button>
-                  <button className="button button--primary" onClick={loadDemo}>
-                    Load demo result
                   </button>
                 </div>
               </section>

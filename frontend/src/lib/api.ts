@@ -32,11 +32,6 @@ export async function codeInvoices(files: File[]): Promise<BatchInvoiceCodingRes
   return parseResponse<BatchInvoiceCodingResult>(response);
 }
 
-export async function fetchDemoInvoice(): Promise<InvoiceCodingResult> {
-  const response = await fetch(`${API_BASE_URL}/api/demo-invoice`);
-  return parseResponse<InvoiceCodingResult>(response);
-}
-
 async function parseResponse<T>(response: Response): Promise<T> {
   if (response.ok) {
     return response.json() as Promise<T>;
