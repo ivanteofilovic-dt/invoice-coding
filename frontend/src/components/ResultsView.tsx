@@ -1,6 +1,7 @@
-import { AlertCircle, FileCheck } from "lucide-react";
+import { AlertCircle, Download, FileCheck } from "lucide-react";
 import { useMemo, useState } from "react";
 
+import { exportResultsToExcel } from "../lib/export";
 import type { BatchInvoiceError, InvoiceCodingResult } from "../types";
 import { LineItemCard } from "./LineItemCard";
 import { MockPdfViewer } from "./MockPdfViewer";
@@ -29,9 +30,19 @@ export function ResultsView({ results, files, errors, onReset }: ResultsViewProp
               <FileCheck size={28} />
               {isBatch ? "Batch complete" : "Coding complete"}
             </h2>
-            <button className="button button--secondary" type="button" onClick={onReset}>
-              Upload more
-            </button>
+            <div className="results-header__actions">
+              <button
+                className="button button--primary"
+                type="button"
+                onClick={() => exportResultsToExcel(results)}
+              >
+                <Download size={16} />
+                Export to Excel
+              </button>
+              <button className="button button--secondary" type="button" onClick={onReset}>
+                Upload more
+              </button>
+            </div>
           </div>
 
           {isBatch && (

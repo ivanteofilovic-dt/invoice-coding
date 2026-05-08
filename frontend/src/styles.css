@@ -604,6 +604,19 @@ button {
   color: #166534;
 }
 
+.results-header__actions {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.results-header__actions .button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
 .summary-card {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
